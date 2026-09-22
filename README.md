@@ -117,7 +117,5 @@ This project is licensed under the open-source **MIT License** with an Education
 
 ---
 
-*Developed for NTEC 3D Printing Office (3DPO) — Advancing Personalized Medicine through 3D Innovation.*
-
-<a href="https://info.flagcounter.com/6ewu"><img src="https://s01.flagcounter.com/count2/6ewu/bg_FFFFFF/txt_000000/border_CCCCCC/columns_2/maxflags_10/viewers_0/labels_0/pageviews_0/flags_0/percent_0/" alt="Free counters!" border="0"></a>
+*Developed for NTEC 3D Printing Office — Advancing Personalized Medicine through 3D Innovation.*
 

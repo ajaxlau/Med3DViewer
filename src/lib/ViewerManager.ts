@@ -135,6 +135,10 @@ export class ViewerManager {
   translationStartPos: any = null;
   translationAxisName: string | null = null;
 
+  // Planning Callout Card Custom Hover Description Box state
+  cardTooltipDiv: HTMLDivElement | null = null;
+  hoveredPlanningObject: any = null;
+
   // Smart Ghosting / Focus-X-Ray State
   isGhostingMode: boolean = false;
   ghostedOriginals: Map<any, { color: number | null, opacity: number, transparent: boolean, depthWrite: boolean, emissive: number | null, map: any, roughness: number | null, metalness: number | null, shininess?: number | null, specular?: number | null, vertexColors?: any }> = new Map();
@@ -1079,7 +1083,11 @@ export class ViewerManager {
             if (created && created.labelDiv && created.baseDistance !== undefined) {
                 const text = created.name ? `${created.name} (${created.baseDistance.toFixed(2)} mm)` : `${created.baseDistance.toFixed(2)} mm`;
                 created.labelDiv.innerText = text;
-                created.labelDiv.style.display = created.visible ? 'block' : 'none';
+                created.labelDiv.style.display = created.visible ? 'flex' : 'none';
+                if (!created.visible) {
+                    created.labelDiv.style.opacity = '0';
+                    if (created.leaderLine) created.leaderLine.style.display = 'none';
+                }
             }
           } else if (obj.type === 'angle') {
             const p1Val = new THREE.Vector3(obj.p1.x, obj.p1.y, obj.p1.z);
@@ -1094,7 +1102,11 @@ export class ViewerManager {
             if (created && created.labelDiv && created.angle !== undefined) {
                 const text = created.name ? `${created.name} (${created.angle.toFixed(1)}°)` : `${created.angle.toFixed(1)}°`;
                 created.labelDiv.innerText = text;
-                created.labelDiv.style.display = created.visible ? 'block' : 'none';
+                created.labelDiv.style.display = created.visible ? 'flex' : 'none';
+                if (!created.visible) {
+                    created.labelDiv.style.opacity = '0';
+                    if (created.leaderLine) created.leaderLine.style.display = 'none';
+                }
             }
           } else if (obj.type === 'point') {
             const pVal = new THREE.Vector3(obj.points[0].x, obj.points[0].y, obj.points[0].z);
@@ -1125,6 +1137,10 @@ export class ViewerManager {
                 created.labelDiv.innerText = created.text || created.name;
               }
               created.labelDiv.style.display = created.visible ? 'flex' : 'none';
+              if (!created.visible) {
+                created.labelDiv.style.opacity = '0';
+                if (created.leaderLine) created.leaderLine.style.display = 'none';
+              }
             }
           } else if (obj.type === 'custom_model' && obj.fileDataURL) {
               try {
@@ -2715,6 +2731,214 @@ export class ViewerManager {
       return { x, y, z: vector.z };
   }
 
+  ensureCardTooltipElement(): HTMLDivElement {
+    if (!this.cardTooltipDiv) {
+      const tooltip = document.createElement('div');
+      tooltip.className = 'card-hover-tooltip absolute z-50 pointer-events-none transition-all duration-150 ease-out select-none shadow-2xl backdrop-blur-md rounded-xl p-3 border border-slate-700/80 bg-slate-900/95 text-white max-w-[280px] min-w-[210px] flex flex-col gap-1.5 opacity-0 scale-95';
+      tooltip.style.backgroundColor = 'rgba(15, 23, 42, 0.96)';
+      tooltip.style.borderColor = 'rgba(51, 65, 85, 0.8)';
+      tooltip.style.boxShadow = '0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5)';
+      tooltip.style.backdropFilter = 'blur(12px)';
+      tooltip.style.display = 'none';
+      if (this.container) {
+        this.container.appendChild(tooltip);
+      }
+      this.cardTooltipDiv = tooltip;
+    }
+    return this.cardTooltipDiv;
+  }
+
+  showCardTooltip(obj: any, labelDiv: HTMLElement) {
+    if (!obj || obj.visible === false || !this.container) return;
+    this.hoveredPlanningObject = obj;
+    const tooltip = this.ensureCardTooltipElement();
+
+    let typeLabel = 'Object';
+    let titleText = obj.name || 'Callout';
+    const detailText = obj.description ? String(obj.description).trim() : '';
+    const color = obj.color || (obj.type === 'angle' ? '#d97706' : (obj.type === 'measurement' ? '#10b981' : '#0284c7'));
+
+    if (obj.type === 'measurement') {
+      typeLabel = 'Distance';
+      const val = obj.baseDistance !== undefined ? `${obj.baseDistance.toFixed(2)} mm` : '';
+      titleText = obj.name ? `${obj.name}${val ? ` (${val})` : ''}` : val;
+    } else if (obj.type === 'angle') {
+      typeLabel = 'Angle';
+      const val = obj.angle !== undefined ? `${obj.angle.toFixed(1)}°` : '';
+      titleText = obj.name ? `${obj.name}${val ? ` (${val})` : ''}` : val;
+    } else if (obj.type === 'annotation') {
+      typeLabel = '3D Pin';
+      titleText = obj.text || obj.name || 'Annotation';
+    }
+
+    tooltip.style.borderTop = `2.5px solid ${color}`;
+    tooltip.innerHTML = `
+      <div class="flex items-center justify-between gap-2.5 pb-2 border-b border-slate-800/80">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style="background-color: ${color}"></span>
+          <span class="font-mono text-xs font-bold text-white tracking-tight truncate">${titleText}</span>
+        </div>
+        <span class="text-[9px] uppercase font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60 font-semibold tracking-wider shrink-0">${typeLabel}</span>
+      </div>
+      ${detailText ? `
+        <div class="text-[11px] text-zinc-300 font-sans leading-relaxed break-words whitespace-pre-wrap py-1">
+          ${detailText}
+        </div>
+      ` : ''}
+      <div class="flex items-center gap-1.5 pt-2 text-[10px] text-zinc-400 font-sans border-t border-slate-800/80">
+        <svg class="w-3.5 h-3.5 text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>
+        <span class="leading-tight">Drag to reposition • Double-click to reset</span>
+      </div>
+    `;
+
+    tooltip.style.display = 'flex';
+    this.updateCardTooltipPosition(labelDiv);
+
+    requestAnimationFrame(() => {
+      if (this.cardTooltipDiv && this.hoveredPlanningObject?.id === obj.id) {
+        this.cardTooltipDiv.classList.remove('opacity-0', 'scale-95');
+        this.cardTooltipDiv.classList.add('opacity-100', 'scale-100');
+      }
+    });
+  }
+
+  updateCardTooltipPosition(labelDiv?: HTMLElement) {
+    if (!this.cardTooltipDiv || !this.hoveredPlanningObject) return;
+    const target = labelDiv || this.hoveredPlanningObject.labelDiv;
+    if (!target || !this.container) return;
+
+    const containerRect = this.container.getBoundingClientRect();
+    const pillRect = target.getBoundingClientRect();
+
+    if (pillRect.width === 0 || pillRect.height === 0 || target.style.display === 'none') {
+      this.hideCardTooltip();
+      return;
+    }
+
+    const tooltipWidth = this.cardTooltipDiv.offsetWidth || 230;
+    const tooltipHeight = this.cardTooltipDiv.offsetHeight || 80;
+
+    const pillCenterX = pillRect.left + pillRect.width / 2 - containerRect.left;
+    const pillTop = pillRect.top - containerRect.top;
+    const pillBottom = pillRect.bottom - containerRect.top;
+
+    let top = pillBottom + 8;
+    if (top + tooltipHeight > containerRect.height - 12) {
+      top = Math.max(10, pillTop - tooltipHeight - 8);
+    }
+
+    let left = pillCenterX - tooltipWidth / 2;
+    left = Math.max(10, Math.min(containerRect.width - tooltipWidth - 10, left));
+
+    this.cardTooltipDiv.style.left = `${Math.round(left)}px`;
+    this.cardTooltipDiv.style.top = `${Math.round(top)}px`;
+  }
+
+  hideCardTooltip() {
+    this.hoveredPlanningObject = null;
+    if (this.cardTooltipDiv) {
+      this.cardTooltipDiv.classList.remove('opacity-100', 'scale-100');
+      this.cardTooltipDiv.classList.add('opacity-0', 'scale-95');
+      setTimeout(() => {
+        if (!this.hoveredPlanningObject && this.cardTooltipDiv) {
+          this.cardTooltipDiv.style.display = 'none';
+        }
+      }, 150);
+    }
+  }
+
+  setupCardInteractions(obj: any, labelDiv: HTMLDivElement) {
+      let isPointerDown = false;
+      let startX = 0;
+      let startY = 0;
+      let origOffsetX = 0;
+      let origOffsetY = 0;
+      let isDraggingCard = false;
+
+      // Ensure no primitive browser native OS tooltip
+      labelDiv.removeAttribute('title');
+
+      labelDiv.addEventListener('pointerenter', () => {
+          if (isDraggingCard || isPointerDown) return;
+          this.showCardTooltip(obj, labelDiv);
+      });
+
+      labelDiv.addEventListener('pointerleave', () => {
+          this.hideCardTooltip();
+      });
+
+      labelDiv.addEventListener('pointerdown', (e: PointerEvent) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          this.hideCardTooltip();
+          isPointerDown = true;
+          isDraggingCard = false;
+          startX = e.clientX;
+          startY = e.clientY;
+          origOffsetX = obj.cardOffset?.x || 0;
+          origOffsetY = obj.cardOffset?.y || 0;
+          labelDiv.style.cursor = 'grabbing';
+          try {
+              labelDiv.setPointerCapture(e.pointerId);
+          } catch(err) {}
+      });
+
+      labelDiv.addEventListener('pointermove', (e: PointerEvent) => {
+          if (!isPointerDown) return;
+          e.stopPropagation();
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          if (Math.hypot(dx, dy) > 2) {
+              isDraggingCard = true;
+              this.hideCardTooltip();
+          }
+          if (isDraggingCard) {
+              obj.cardOffset = {
+                  x: Math.round(origOffsetX + dx),
+                  y: Math.round(origOffsetY + dy)
+              };
+              this.updatePlanningCardLabel(obj);
+          }
+      });
+
+      const onPointerEnd = (e: PointerEvent) => {
+          if (!isPointerDown) return;
+          isPointerDown = false;
+          labelDiv.style.cursor = 'grab';
+          try {
+              if (labelDiv.hasPointerCapture(e.pointerId)) {
+                  labelDiv.releasePointerCapture(e.pointerId);
+              }
+          } catch(err) {}
+
+          if (isDraggingCard) {
+              e.stopPropagation();
+              this.saveToLocalStorage();
+              if (this.config.onPlanningObjectsChange) {
+                  this.config.onPlanningObjectsChange(this.planningObjects);
+              }
+          } else {
+              this.highlightPlanningMesh(obj);
+              if (this.config.onTransformActiveChange) {
+                  this.config.onTransformActiveChange(false);
+              }
+          }
+      };
+
+      labelDiv.addEventListener('pointerup', onPointerEnd);
+      labelDiv.addEventListener('pointercancel', onPointerEnd);
+
+      labelDiv.addEventListener('dblclick', (e: MouseEvent) => {
+          e.stopPropagation();
+          this.hideCardTooltip();
+          obj.cardOffset = { x: 0, y: 0 };
+          this.updatePlanningCardLabel(obj);
+          this.saveToLocalStorage();
+          if (this.config.onPlanningObjectsChange) {
+              this.config.onPlanningObjectsChange(this.planningObjects);
+          }
+      });
+  }
 
   createPlanningMeasurement(p1: any, p2: any, angle: number, cardOffset?: { x: number, y: number }) {
       if (!window.THREE || !this.viewer || !this.viewer.viewer) return;
@@ -2762,8 +2986,6 @@ export class ViewerManager {
       labelDiv.style.transform = 'translate(-50%, -100%)';
       labelDiv.style.opacity = '0';
       labelDiv.style.touchAction = 'none';
-      const tooltipSuffix = '\n(Drag to reposition card • Double-click to reset position)';
-      labelDiv.title = `${defaultIdAndName} (${displayText})` + tooltipSuffix;
 
       const dot = document.createElement('span');
       dot.className = 'measurement-color-dot w-2 h-2 rounded-full shrink-0 shadow-xs pointer-events-none';
@@ -2795,82 +3017,7 @@ export class ViewerManager {
           visible: true
       };
 
-      // Pointer drag interaction for measurement card
-      let isPointerDown = false;
-      let startX = 0;
-      let startY = 0;
-      let origOffsetX = 0;
-      let origOffsetY = 0;
-      let isDraggingCard = false;
-
-      labelDiv.addEventListener('pointerdown', (e: PointerEvent) => {
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          isPointerDown = true;
-          isDraggingCard = false;
-          startX = e.clientX;
-          startY = e.clientY;
-          origOffsetX = measurementObj.cardOffset?.x || 0;
-          origOffsetY = measurementObj.cardOffset?.y || 0;
-          labelDiv.style.cursor = 'grabbing';
-          try {
-              labelDiv.setPointerCapture(e.pointerId);
-          } catch(err) {}
-      });
-
-      labelDiv.addEventListener('pointermove', (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          e.stopPropagation();
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
-          if (Math.hypot(dx, dy) > 2) {
-              isDraggingCard = true;
-          }
-          if (isDraggingCard) {
-              measurementObj.cardOffset = {
-                  x: Math.round(origOffsetX + dx),
-                  y: Math.round(origOffsetY + dy)
-              };
-              this.updatePlanningCardLabel(measurementObj);
-          }
-      });
-
-      const onPointerEnd = (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          isPointerDown = false;
-          labelDiv.style.cursor = 'grab';
-          try {
-              if (labelDiv.hasPointerCapture(e.pointerId)) {
-                  labelDiv.releasePointerCapture(e.pointerId);
-              }
-          } catch(err) {}
-
-          if (isDraggingCard) {
-              e.stopPropagation();
-              this.saveToLocalStorage();
-              if (this.config.onPlanningObjectsChange) {
-                  this.config.onPlanningObjectsChange(this.planningObjects);
-              }
-          } else {
-              this.highlightPlanningMesh(measurementObj);
-              if (this.config.onTransformActiveChange) {
-                  this.config.onTransformActiveChange(false);
-              }
-          }
-      };
-
-      labelDiv.addEventListener('pointerup', onPointerEnd);
-      labelDiv.addEventListener('pointercancel', onPointerEnd);
-
-      labelDiv.addEventListener('dblclick', (e: MouseEvent) => {
-          e.stopPropagation();
-          measurementObj.cardOffset = { x: 0, y: 0 };
-          this.updatePlanningCardLabel(measurementObj);
-          this.saveToLocalStorage();
-          if (this.config.onPlanningObjectsChange) {
-              this.config.onPlanningObjectsChange(this.planningObjects);
-          }
-      });
+      this.setupCardInteractions(measurementObj, labelDiv);
 
       this.container.appendChild(labelDiv);
       mesh.userData = { isCustomOverlay: true };
@@ -2986,8 +3133,6 @@ export class ViewerManager {
       labelDiv.style.transform = 'translate(-50%, -100%)';
       labelDiv.style.opacity = '0';
       labelDiv.style.touchAction = 'none';
-      const tooltipSuffix = '\n(Drag to reposition card • Double-click to reset position)';
-      labelDiv.title = (description ? `${actualText}\n${description}` : actualText) + tooltipSuffix;
 
       const dot = document.createElement('span');
       dot.className = 'annotation-color-dot w-2 h-2 rounded-full shrink-0 shadow-xs pointer-events-none';
@@ -3016,84 +3161,7 @@ export class ViewerManager {
           visible: true
       };
 
-      // Pointer drag interaction
-      let isPointerDown = false;
-      let startX = 0;
-      let startY = 0;
-      let origOffsetX = 0;
-      let origOffsetY = 0;
-      let isDraggingCard = false;
-
-      labelDiv.addEventListener('pointerdown', (e: PointerEvent) => {
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          isPointerDown = true;
-          isDraggingCard = false;
-          startX = e.clientX;
-          startY = e.clientY;
-          origOffsetX = annotationObj.cardOffset?.x || 0;
-          origOffsetY = annotationObj.cardOffset?.y || 0;
-          labelDiv.style.cursor = 'grabbing';
-          try {
-              labelDiv.setPointerCapture(e.pointerId);
-          } catch(err) {}
-      });
-
-      labelDiv.addEventListener('pointermove', (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          e.stopPropagation();
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
-          if (Math.hypot(dx, dy) > 2) {
-              isDraggingCard = true;
-          }
-          if (isDraggingCard) {
-              annotationObj.cardOffset = {
-                  x: Math.round(origOffsetX + dx),
-                  y: Math.round(origOffsetY + dy)
-              };
-              this.updateSingleAnnotationLabel(annotationObj);
-          }
-      });
-
-      const onPointerEnd = (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          isPointerDown = false;
-          labelDiv.style.cursor = 'grab';
-          try {
-              if (labelDiv.hasPointerCapture(e.pointerId)) {
-                  labelDiv.releasePointerCapture(e.pointerId);
-              }
-          } catch(err) {}
-
-          if (isDraggingCard) {
-              e.stopPropagation();
-              this.saveToLocalStorage();
-              if (this.config.onPlanningObjectsChange) {
-                  this.config.onPlanningObjectsChange(this.planningObjects);
-              }
-          } else {
-              // Clicked without drag: simply highlight
-              this.highlightPlanningMesh(annotationObj);
-              if (this.config.onTransformActiveChange) {
-                  this.config.onTransformActiveChange(false);
-              }
-          }
-      };
-
-      labelDiv.addEventListener('pointerup', onPointerEnd);
-      labelDiv.addEventListener('pointercancel', onPointerEnd);
-
-      // Double-click resets card position directly back to the pin tip
-      labelDiv.addEventListener('dblclick', (e: MouseEvent) => {
-          e.stopPropagation();
-          annotationObj.cardOffset = { x: 0, y: 0 };
-          this.updateSingleAnnotationLabel(annotationObj);
-          this.saveToLocalStorage();
-          if (this.config.onPlanningObjectsChange) {
-              this.config.onPlanningObjectsChange(this.planningObjects);
-          }
-      });
+      this.setupCardInteractions(annotationObj, labelDiv);
 
       this.container.appendChild(labelDiv);
 
@@ -3123,6 +3191,12 @@ export class ViewerManager {
   }
 
   updateCardLeaderLine(obj: any, anchorX: number, anchorY: number, cardX: number, cardY: number) {
+      if (obj.visible === false) {
+          if (obj.leaderLine) {
+              obj.leaderLine.style.display = 'none';
+          }
+          return;
+      }
       const hasOffset = obj.cardOffset && (Math.abs(obj.cardOffset.x) > 1 || Math.abs(obj.cardOffset.y) > 1);
       const svg = this.ensureAnnotationSvgOverlay();
       const defaultColor = obj.type === 'angle' ? '#d97706' : (obj.type === 'measurement' ? '#10b981' : '#0284c7');
@@ -3137,7 +3211,7 @@ export class ViewerManager {
           obj.leaderLine = line;
       }
 
-      if (hasOffset && obj.visible !== false) {
+      if (hasOffset) {
           obj.leaderLine.setAttribute('x1', String(anchorX));
           obj.leaderLine.setAttribute('y1', String(anchorY));
           obj.leaderLine.setAttribute('x2', String(cardX));
@@ -3154,7 +3228,23 @@ export class ViewerManager {
   }
 
   updatePlanningCardLabel(obj: any) {
-      if (!obj || !obj.labelDiv || !['annotation', 'measurement', 'angle'].includes(obj.type)) return;
+      if (!obj || !['annotation', 'measurement', 'angle'].includes(obj.type)) return;
+
+      if (obj.visible === false) {
+          if (obj.labelDiv) {
+              obj.labelDiv.style.opacity = '0';
+              obj.labelDiv.style.display = 'none';
+          }
+          if (obj.leaderLine) {
+              obj.leaderLine.style.display = 'none';
+          }
+          if (this.hoveredPlanningObject?.id === obj.id) {
+              this.hideCardTooltip();
+          }
+          return;
+      }
+
+      if (!obj.labelDiv) return;
       if (!window.THREE) return;
 
       let targetPos: any = null;
@@ -3184,7 +3274,7 @@ export class ViewerManager {
 
       if (targetPos) {
           const screen = this.projectToScreen(targetPos);
-          if (screen && screen.z < 1 && obj.visible !== false) {
+          if (screen && screen.z < 1) {
               const offsetX = obj.cardOffset?.x || 0;
               const offsetY = obj.cardOffset?.y || 0;
               const yAnchorShift = obj.type === 'annotation' ? -18 : -14;
@@ -3197,12 +3287,28 @@ export class ViewerManager {
               obj.labelDiv.style.display = 'flex';
 
               this.updateCardLeaderLine(obj, screen.x, screen.y, cardX, cardY);
+
+              if (this.hoveredPlanningObject?.id === obj.id) {
+                  this.updateCardTooltipPosition(obj.labelDiv);
+              }
           } else {
               obj.labelDiv.style.opacity = '0';
               obj.labelDiv.style.display = 'none';
               if (obj.leaderLine) {
                   obj.leaderLine.style.display = 'none';
               }
+              if (this.hoveredPlanningObject?.id === obj.id) {
+                  this.hideCardTooltip();
+              }
+          }
+      } else {
+          obj.labelDiv.style.opacity = '0';
+          obj.labelDiv.style.display = 'none';
+          if (obj.leaderLine) {
+              obj.leaderLine.style.display = 'none';
+          }
+          if (this.hoveredPlanningObject?.id === obj.id) {
+              this.hideCardTooltip();
           }
       }
   }
@@ -3273,7 +3379,10 @@ export class ViewerManager {
               const dot = obj.labelDiv.querySelector('.annotation-color-dot') as HTMLElement;
               if (dot) dot.style.backgroundColor = obj.color;
           }
-          obj.labelDiv.title = obj.description ? `${obj.text || obj.name}\n${obj.description}` : (obj.text || obj.name);
+          obj.labelDiv.removeAttribute('title');
+          if (this.hoveredPlanningObject?.id === obj.id) {
+              this.showCardTooltip(obj, obj.labelDiv);
+          }
       }
 
       if (this.config.onPlanningObjectsChange) {
@@ -3440,8 +3549,6 @@ export class ViewerManager {
       labelDiv.style.transform = 'translate(-50%, -100%)';
       labelDiv.style.opacity = '0';
       labelDiv.style.touchAction = 'none';
-      const tooltipSuffix = '\n(Drag to reposition card • Double-click to reset position)';
-      labelDiv.title = `${defaultIdAndName} (${displayText})` + tooltipSuffix;
 
       const dot = document.createElement('span');
       dot.className = 'angle-color-dot w-2 h-2 rounded-full shrink-0 shadow-xs pointer-events-none';
@@ -3471,82 +3578,7 @@ export class ViewerManager {
           visible: true
       };
 
-      // Pointer drag interaction for angle card
-      let isPointerDown = false;
-      let startX = 0;
-      let startY = 0;
-      let origOffsetX = 0;
-      let origOffsetY = 0;
-      let isDraggingCard = false;
-
-      labelDiv.addEventListener('pointerdown', (e: PointerEvent) => {
-          if (e.button !== 0) return;
-          e.stopPropagation();
-          isPointerDown = true;
-          isDraggingCard = false;
-          startX = e.clientX;
-          startY = e.clientY;
-          origOffsetX = angleObj.cardOffset?.x || 0;
-          origOffsetY = angleObj.cardOffset?.y || 0;
-          labelDiv.style.cursor = 'grabbing';
-          try {
-              labelDiv.setPointerCapture(e.pointerId);
-          } catch(err) {}
-      });
-
-      labelDiv.addEventListener('pointermove', (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          e.stopPropagation();
-          const dx = e.clientX - startX;
-          const dy = e.clientY - startY;
-          if (Math.hypot(dx, dy) > 2) {
-              isDraggingCard = true;
-          }
-          if (isDraggingCard) {
-              angleObj.cardOffset = {
-                  x: Math.round(origOffsetX + dx),
-                  y: Math.round(origOffsetY + dy)
-              };
-              this.updatePlanningCardLabel(angleObj);
-          }
-      });
-
-      const onPointerEnd = (e: PointerEvent) => {
-          if (!isPointerDown) return;
-          isPointerDown = false;
-          labelDiv.style.cursor = 'grab';
-          try {
-              if (labelDiv.hasPointerCapture(e.pointerId)) {
-                  labelDiv.releasePointerCapture(e.pointerId);
-              }
-          } catch(err) {}
-
-          if (isDraggingCard) {
-              e.stopPropagation();
-              this.saveToLocalStorage();
-              if (this.config.onPlanningObjectsChange) {
-                  this.config.onPlanningObjectsChange(this.planningObjects);
-              }
-          } else {
-              this.highlightPlanningMesh(angleObj);
-              if (this.config.onTransformActiveChange) {
-                  this.config.onTransformActiveChange(false);
-              }
-          }
-      };
-
-      labelDiv.addEventListener('pointerup', onPointerEnd);
-      labelDiv.addEventListener('pointercancel', onPointerEnd);
-
-      labelDiv.addEventListener('dblclick', (e: MouseEvent) => {
-          e.stopPropagation();
-          angleObj.cardOffset = { x: 0, y: 0 };
-          this.updatePlanningCardLabel(angleObj);
-          this.saveToLocalStorage();
-          if (this.config.onPlanningObjectsChange) {
-              this.config.onPlanningObjectsChange(this.planningObjects);
-          }
-      });
+      this.setupCardInteractions(angleObj, labelDiv);
 
       this.container.appendChild(labelDiv);
       group.userData = { isCustomOverlay: true };
@@ -3564,7 +3596,7 @@ export class ViewerManager {
       obj.name = name;
       
       if (obj.labelDiv) {
-          const tooltipSuffix = '\n(Drag to reposition card • Double-click to reset position)';
+          obj.labelDiv.removeAttribute('title');
           if (obj.type === 'angle') {
               const text = obj.name ? `${obj.name} (${obj.angle.toFixed(1)}°)` : `${obj.angle.toFixed(1)}°`;
               const labelSpan = obj.labelDiv.querySelector('.angle-label-text');
@@ -3573,7 +3605,6 @@ export class ViewerManager {
               } else {
                   obj.labelDiv.innerText = text;
               }
-              obj.labelDiv.title = text + tooltipSuffix;
           } else if (obj.type === 'annotation') {
               obj.text = name;
               const labelSpan = obj.labelDiv.querySelector('.annotation-label-text');
@@ -3582,7 +3613,6 @@ export class ViewerManager {
               } else {
                   obj.labelDiv.innerText = name;
               }
-              obj.labelDiv.title = (obj.description ? `${name}\n${obj.description}` : name) + tooltipSuffix;
           } else if (obj.baseDistance !== undefined || obj.type === 'measurement') {
               const text = obj.name ? `${obj.name} (${obj.baseDistance.toFixed(2)} mm)` : `${obj.baseDistance.toFixed(2)} mm`;
               const labelSpan = obj.labelDiv.querySelector('.measurement-label-text');
@@ -3591,7 +3621,9 @@ export class ViewerManager {
               } else {
                   obj.labelDiv.innerText = text;
               }
-              obj.labelDiv.title = text + tooltipSuffix;
+          }
+          if (this.hoveredPlanningObject?.id === obj.id) {
+              this.showCardTooltip(obj, obj.labelDiv);
           }
       }
 
@@ -4820,6 +4852,9 @@ export class ViewerManager {
   }
 
   removePlanningObject(id: string) {
+      if (this.hoveredPlanningObject?.id === id) {
+          this.hideCardTooltip();
+      }
       const idx = this.planningObjects.findIndex(o => o.id === id);
       if (idx > -1) {
           const obj = this.planningObjects[idx];
@@ -4962,6 +4997,9 @@ export class ViewerManager {
       group.visible = visible;
       
       // Affect all planning objects in this group
+      if (!visible && this.hoveredPlanningObject?.groupId === groupId) {
+        this.hideCardTooltip();
+      }
       this.planningObjects.forEach(o => {
         if (o.groupId === groupId) {
           o.visible = visible;
@@ -4969,11 +5007,23 @@ export class ViewerManager {
             o.mesh.visible = visible;
           }
           if (o.labelDiv) {
-            o.labelDiv.style.display = visible ? 'block' : 'none';
+            o.labelDiv.style.display = visible ? 'flex' : 'none';
+            if (!visible) {
+              o.labelDiv.style.opacity = '0';
+            }
+          }
+          if (o.leaderLine) {
+            if (!visible) {
+              o.leaderLine.style.display = 'none';
+            }
+          }
+          if (visible && (o.type === 'annotation' || o.type === 'measurement' || o.type === 'angle')) {
+            this.updatePlanningCardLabel(o);
           }
         }
       });
       
+      this.forceNextOverlayUpdate = true;
       this.notifyGroupsChanged();
       if (this.viewer?.viewer) {
         try { this.viewer.viewer.Render(); } catch(e) {}
@@ -5000,12 +5050,27 @@ export class ViewerManager {
     const obj = this.planningObjects.find(o => o.id === id);
     if (obj) {
       obj.visible = obj.visible !== undefined ? !obj.visible : false;
+      if (!obj.visible && this.hoveredPlanningObject?.id === obj.id) {
+        this.hideCardTooltip();
+      }
       if (obj.mesh) {
         obj.mesh.visible = obj.visible;
       }
       if (obj.labelDiv) {
-        obj.labelDiv.style.display = obj.visible ? 'block' : 'none';
+        obj.labelDiv.style.display = obj.visible ? 'flex' : 'none';
+        if (!obj.visible) {
+          obj.labelDiv.style.opacity = '0';
+        }
       }
+      if (obj.leaderLine) {
+        if (!obj.visible) {
+          obj.leaderLine.style.display = 'none';
+        }
+      }
+      if (obj.visible && (obj.type === 'annotation' || obj.type === 'measurement' || obj.type === 'angle')) {
+        this.updatePlanningCardLabel(obj);
+      }
+      this.forceNextOverlayUpdate = true;
       this.saveToLocalStorage();
       if (this.viewer?.viewer) {
         try { this.viewer.viewer.Render(); } catch(e) {}
@@ -5023,6 +5088,7 @@ export class ViewerManager {
   }
 
   clearAllPlanningObjects(save: boolean = true) {
+      this.hideCardTooltip();
       if (this.transformControl) {
           this.transformControl.detach();
                     this.highlightPlanningMesh(null);
@@ -5276,7 +5342,13 @@ export class ViewerManager {
                   const text = newObj.name ? `${newObj.name} (${newObj.angle.toFixed(1)}°)` : `${newObj.angle.toFixed(1)}°`;
                   newObj.labelDiv.innerText = text;
               }
-              newObj.labelDiv.style.display = newObj.visible ? 'block' : 'none';
+              newObj.labelDiv.style.display = newObj.visible ? 'flex' : 'none';
+              if (!newObj.visible) {
+                  newObj.labelDiv.style.opacity = '0';
+                  if (newObj.leaderLine) newObj.leaderLine.style.display = 'none';
+              } else {
+                  this.updatePlanningCardLabel(newObj);
+              }
           }
           
           if (this.viewer?.viewer) {
@@ -6297,6 +6369,14 @@ It contains both Slicer markup properties and the application's internal groupin
           obj.mesh.visible = obj.visible;
           if (obj.labelDiv) {
               obj.labelDiv.style.display = obj.visible ? 'flex' : 'none';
+              if (!obj.visible) {
+                  obj.labelDiv.style.opacity = '0';
+                  if (this.hoveredPlanningObject?.id === obj.id) {
+                      this.hideCardTooltip();
+                  }
+              } else if (this.hoveredPlanningObject?.id === obj.id) {
+                  this.showCardTooltip(obj, obj.labelDiv);
+              }
               if (obj.color) {
                   obj.labelDiv.style.borderColor = obj.color;
                   const annDot = obj.labelDiv.querySelector('.annotation-color-dot') as HTMLElement;
@@ -6309,6 +6389,9 @@ It contains both Slicer markup properties and the application's internal groupin
               if (obj.leaderLine) {
                   obj.leaderLine.setAttribute('stroke', obj.color || '#0284c7');
                   if (!obj.visible) obj.leaderLine.style.display = 'none';
+              }
+              if (obj.visible && (obj.type === 'annotation' || obj.type === 'measurement' || obj.type === 'angle')) {
+                  this.updatePlanningCardLabel(obj);
               }
           }
           if (this.viewer && this.viewer.viewer && typeof this.viewer.viewer.Render === 'function') {
@@ -7433,7 +7516,7 @@ It contains both Slicer markup properties and the application's internal groupin
             if ((cameraMoved || isInteracting || this.forceNextOverlayUpdate) && this.planningObjects) {
                 this.forceNextOverlayUpdate = false;
                 this.planningObjects.forEach(obj => {
-                    if (obj.labelDiv && (obj.type === 'annotation' || obj.type === 'measurement' || obj.type === 'angle')) {
+                    if ((obj.labelDiv || obj.leaderLine) && (obj.type === 'annotation' || obj.type === 'measurement' || obj.type === 'angle')) {
                         this.updatePlanningCardLabel(obj);
                     }
                 });
@@ -7612,56 +7695,96 @@ It contains both Slicer markup properties and the application's internal groupin
       };
 
       this.planningObjects.forEach(obj => {
-          if ((obj.type === 'measurement' || obj.type === 'angle') && obj.visible !== false && obj.p2) {
-              const proj = projectToTargetSize(obj.p2, width, height, v.camera);
-              if (proj && proj.z < 1) {
-                  let text = '';
-                  let borderColor = '#10b981';
-                  if (obj.type === 'angle') {
-                      text = obj.name ? `${obj.name} (${obj.angle.toFixed(1)}°)` : `${obj.angle.toFixed(1)}°`;
-                      borderColor = '#d97706';
-                  } else {
-                      text = obj.name ? `${obj.name} (${obj.baseDistance.toFixed(2)} mm)` : `${obj.baseDistance.toFixed(2)} mm`;
+          if ((obj.type === 'measurement' || obj.type === 'angle') && obj.visible !== false) {
+              let targetPos: any = null;
+              if (obj.type === 'measurement') {
+                  if (obj.mesh && obj.mesh.position) {
+                      targetPos = obj.mesh.position;
+                  } else if (obj.p1 && (obj.p2Coord || obj.p2)) {
+                      const p2 = obj.p2Coord || obj.p2;
+                      targetPos = new window.THREE.Vector3(
+                          (obj.p1.x + p2.x) * 0.5,
+                          (obj.p1.y + p2.y) * 0.5,
+                          (obj.p1.z + p2.z) * 0.5
+                      );
                   }
-                  
-                  ctx.save();
-                  ctx.font = `bold ${Math.round(11 * scaleFactor)}px monospace`;
-                  
-                  // Calculate text metric measurements
-                  const textMetrics = ctx.measureText(text);
-                  const textWidth = textMetrics.width;
-                  const textHeight = 11 * scaleFactor;
-                  
-                  const padX = 8 * scaleFactor;
-                  const padY = 4 * scaleFactor;
-                  
-                  const pillW = textWidth + padX * 2;
-                  const pillH = textHeight + padY * 2;
-                  
-                  const pillX = proj.x - pillW / 2;
-                  const pillY = proj.y - 12 * scaleFactor - pillH / 2; // Draw slightly above
-                  
-                  // Draw capsule background pill
-                  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; // Dark slate-900 background
-                  ctx.strokeStyle = borderColor;
-                  ctx.lineWidth = 1 * scaleFactor;
-                  
-                  ctx.beginPath();
-                  const r = Math.min(pillW, pillH) / 2;
-                  if (ctx.roundRect) {
-                      ctx.roundRect(pillX, pillY, pillW, pillH, r);
-                  } else {
-                      ctx.rect(pillX, pillY, pillW, pillH);
+              } else if (obj.type === 'angle') {
+                  const vertex = obj.p2Coord || obj.p2;
+                  if (vertex) {
+                      targetPos = new window.THREE.Vector3(vertex.x, vertex.y, vertex.z);
                   }
-                  ctx.fill();
-                  ctx.stroke();
-                  
-                  // Center and paint text label
-                  ctx.fillStyle = '#ffffff';
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillText(text, proj.x, proj.y - 12 * scaleFactor);
-                  ctx.restore();
+              }
+
+              if (targetPos) {
+                  const proj = projectToTargetSize(targetPos, width, height, v.camera);
+                  if (proj && proj.z < 1) {
+                      let text = '';
+                      let borderColor = '#10b981';
+                      if (obj.type === 'angle') {
+                          text = obj.name ? `${obj.name} (${obj.angle.toFixed(1)}°)` : `${obj.angle.toFixed(1)}°`;
+                          borderColor = obj.color || '#d97706';
+                      } else {
+                          text = obj.name ? `${obj.name} (${obj.baseDistance.toFixed(2)} mm)` : `${obj.baseDistance.toFixed(2)} mm`;
+                          borderColor = obj.color || '#10b981';
+                      }
+
+                      const offsetX = (obj.cardOffset?.x || 0) * scaleFactor;
+                      const offsetY = (obj.cardOffset?.y || 0) * scaleFactor;
+                      const cardCenterX = proj.x + offsetX;
+                      const cardCenterY = proj.y - 14 * scaleFactor + offsetY;
+
+                      // Draw dashed leader line if card is offset
+                      if (Math.abs(offsetX) > 1 || Math.abs(offsetY) > 1) {
+                          ctx.save();
+                          ctx.strokeStyle = borderColor;
+                          ctx.lineWidth = 1.5 * scaleFactor;
+                          ctx.setLineDash([4 * scaleFactor, 3 * scaleFactor]);
+                          ctx.beginPath();
+                          ctx.moveTo(proj.x, proj.y);
+                          ctx.lineTo(cardCenterX, cardCenterY);
+                          ctx.stroke();
+                          ctx.restore();
+                      }
+                      
+                      ctx.save();
+                      ctx.font = `bold ${Math.round(11 * scaleFactor)}px monospace`;
+                      
+                      // Calculate text metric measurements
+                      const textMetrics = ctx.measureText(text);
+                      const textWidth = textMetrics.width;
+                      const textHeight = 11 * scaleFactor;
+                      
+                      const padX = 8 * scaleFactor;
+                      const padY = 4 * scaleFactor;
+                      
+                      const pillW = textWidth + padX * 2;
+                      const pillH = textHeight + padY * 2;
+                      
+                      const pillX = cardCenterX - pillW / 2;
+                      const pillY = cardCenterY - pillH / 2;
+                      
+                      // Draw capsule background pill
+                      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'; // Dark slate-900 background
+                      ctx.strokeStyle = borderColor;
+                      ctx.lineWidth = 1 * scaleFactor;
+                      
+                      ctx.beginPath();
+                      const r = Math.min(pillW, pillH) / 2;
+                      if (ctx.roundRect) {
+                          ctx.roundRect(pillX, pillY, pillW, pillH, r);
+                      } else {
+                          ctx.rect(pillX, pillY, pillW, pillH);
+                      }
+                      ctx.fill();
+                      ctx.stroke();
+                      
+                      // Center and paint text label
+                      ctx.fillStyle = '#ffffff';
+                      ctx.textAlign = 'center';
+                      ctx.textBaseline = 'middle';
+                      ctx.fillText(text, cardCenterX, cardCenterY);
+                      ctx.restore();
+                  }
               }
           } else if (obj.type === 'annotation' && obj.visible !== false) {
               let targetPos = null;

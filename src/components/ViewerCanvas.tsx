@@ -3,6 +3,7 @@ import { useViewer } from '../context/ViewerContext';
 import { BoxSelect, Camera, Move, RotateCw, Scaling, Info, Plus, Maximize, Loader2, MapPin, X } from 'lucide-react';
 import { EndoscopyFlyThroughHUD } from './EndoscopyFlyThroughHUD';
 import { SplineClippingHUD } from './SplineClippingHUD';
+import { GpuHardwareCard } from './GpuHardwareCard';
 
 export function ViewerCanvas() {
   const { 
@@ -298,14 +299,14 @@ export function ViewerCanvas() {
 
       {/* Empty State / Initial Landing / Loading state */}
       {isEmpty && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none z-15 bg-white dark:bg-zinc-950">
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none z-15 bg-white dark:bg-zinc-950 p-4 sm:p-6 overflow-hidden">
           {(status.includes('Loading') || status.includes('Parsing')) ? (
-            <div className="flex flex-col items-center justify-center max-w-sm px-6">
-              <Loader2 size={44} className="animate-spin text-blue-600 dark:text-blue-400 mb-4" />
-              <h2 className="text-base font-bold text-zinc-800 dark:text-zinc-200 mb-1 tracking-tight uppercase">
+            <div className="flex flex-col items-center justify-center max-w-sm px-6 my-auto">
+              <Loader2 size={40} className="animate-spin text-blue-600 dark:text-blue-400 mb-3" />
+              <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-1 tracking-tight uppercase">
                 {status.replace(/\*\*/g, '')}
               </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-4 font-mono">
                 {filename ? `Preparing ${filename}...` : 'Processing 3D model geometry...'}
               </p>
               {/* Progress Bar */}
@@ -315,22 +316,33 @@ export function ViewerCanvas() {
                   style={{ width: `${Math.max(5, Math.min(100, loadingProgress))}%` }}
                 ></div>
               </div>
-              <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 font-semibold">
+              <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500 font-semibold">
                 {Math.round(loadingProgress || 5)}%
               </span>
             </div>
           ) : (
-            <>
-              <BoxSelect size={48} className="text-zinc-300 dark:text-zinc-700 mb-5" />
-              <h2 className="text-lg mb-2 text-zinc-800 dark:text-zinc-200 font-bold tracking-tight">DROP 3D MODELS TO BEGIN</h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-8 font-mono uppercase tracking-widest">Supports OBJ, STL, GLTF, GLB, PLY</p>
-              <button 
-                onClick={handleOpenFiles}
-                className="pointer-events-auto bg-blue-600 hover:bg-blue-700 text-white border-none py-2.5 px-8 rounded-sm text-xs font-bold uppercase tracking-widest transition-colors shadow-sm"
-              >
-                Browse Files
-              </button>
-            </>
+            <div className="flex flex-col items-center justify-center max-w-xl w-full my-auto gap-3.5">
+              <div className="flex flex-col items-center">
+                <BoxSelect size={32} className="text-zinc-300 dark:text-zinc-700 mb-1.5" />
+                <h2 className="text-sm sm:text-base text-zinc-800 dark:text-zinc-200 font-bold tracking-tight uppercase mb-0.5">
+                  DROP 3D MODELS TO BEGIN
+                </h2>
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2.5 font-mono uppercase tracking-widest">
+                  Supports OBJ · STL · GLTF · GLB · PLY · 3MF
+                </p>
+                <button 
+                  onClick={handleOpenFiles}
+                  className="pointer-events-auto bg-blue-600 hover:bg-blue-700 active:scale-95 text-white border-none py-1.5 px-6 rounded text-xs font-bold uppercase tracking-wider transition-all shadow-xs cursor-pointer"
+                >
+                  Browse Files
+                </button>
+              </div>
+
+              {/* GPU Hardware Card in single frame below Browse Files */}
+              <div className="w-full pointer-events-auto text-left">
+                <GpuHardwareCard />
+              </div>
+            </div>
           )}
         </div>
       )}

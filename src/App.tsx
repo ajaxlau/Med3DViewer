@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { ViewerProvider, useViewer } from './context/ViewerContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { SystemStatusSidebar } from './components/SystemStatusSidebar';
 import { ViewerCanvas } from './components/ViewerCanvas';
 import { Modals } from './components/Modals';
 import { PlanningMenu } from './components/PlanningMenu';
@@ -18,19 +17,6 @@ declare global {
 function MainLayout() {
   const { viewerManager, activeModal, isEmpty } = useViewer();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [systemStatusOpen, setSystemStatusOpen] = useState(true);
-  const prevIsEmptyRef = useRef(isEmpty);
-
-  useEffect(() => {
-    // Hide sidebar automatically once model is loaded
-    if (prevIsEmptyRef.current && !isEmpty) {
-      setSystemStatusOpen(false);
-    } else if (!prevIsEmptyRef.current && isEmpty) {
-      // Re-open by default when workspace is empty
-      setSystemStatusOpen(true);
-    }
-    prevIsEmptyRef.current = isEmpty;
-  }, [isEmpty]);
 
   useEffect(() => {
     let timer1 = setTimeout(() => {
@@ -42,7 +28,7 @@ function MainLayout() {
       if (viewerManager && viewerManager.rulersVisible) viewerManager.resizeRulers();
     }, 300);
     return () => { clearTimeout(timer1); clearTimeout(timer2); };
-  }, [viewerManager, activeModal, isEmpty, systemStatusOpen, sidebarCollapsed]);
+  }, [viewerManager, activeModal, isEmpty, sidebarCollapsed]);
 
   useEffect(() => {
     if (viewerManager) {
@@ -120,14 +106,6 @@ function MainLayout() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [viewerManager]);
 
-  const toggleSystemStatus = () => {
-    setSystemStatusOpen(prev => !prev);
-    setTimeout(() => {
-      if (viewerManager && viewerManager.viewer) viewerManager.viewer.Resize();
-      if (viewerManager && viewerManager.rulersVisible) viewerManager.resizeRulers();
-    }, 300);
-  };
-
   const toggleSidebar = () => {
     setSidebarCollapsed(!sidebarCollapsed);
     setTimeout(() => {
@@ -141,19 +119,8 @@ function MainLayout() {
       <div className="flex flex-col flex-1 overflow-hidden ">
         <Header 
           toggleSidebar={toggleSidebar}
-          systemStatusOpen={systemStatusOpen}
-          toggleSystemStatus={toggleSystemStatus}
         />
         <div className="flex flex-1 min-h-0 relative flex-col md:flex-row">
-          {systemStatusOpen && (
-            <SystemStatusSidebar onClose={() => {
-              setSystemStatusOpen(false);
-              setTimeout(() => {
-                if (viewerManager && viewerManager.viewer) viewerManager.viewer.Resize();
-                if (viewerManager && viewerManager.rulersVisible) viewerManager.resizeRulers();
-              }, 300);
-            }} />
-          )}
           <Sidebar collapsed={sidebarCollapsed} onClose={() => {
             setSidebarCollapsed(true);
             setTimeout(() => {

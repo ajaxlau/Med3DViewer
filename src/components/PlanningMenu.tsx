@@ -664,7 +664,7 @@ export function PlanningMenu() {
                         return (
                             <div 
                                 key={group.id} 
-                                className="border border-zinc-200 dark:border-zinc-800 rounded mb-2 overflow-hidden bg-white dark:bg-zinc-900 shadow-sm"
+                                className="border border-zinc-200 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white dark:bg-zinc-900 shadow-sm"
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => {
                                     e.preventDefault();
@@ -772,7 +772,7 @@ export function PlanningMenu() {
                         
                         return (
                             <div 
-                                className="border border-dashed border-zinc-300 dark:border-zinc-800 rounded mb-2 overflow-hidden bg-white/50 dark:bg-zinc-900/40"
+                                className="border border-dashed border-zinc-300 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white/50 dark:bg-zinc-900/40"
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => {
                                     e.preventDefault();
@@ -915,7 +915,7 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
             setDraggable(false);
             setIsDraggingThis(false);
         }}
-        className={`border rounded overflow-hidden group/item transition-all duration-200 ${
+        className={`border rounded overflow-visible group/item transition-all duration-200 relative ${
             isDraggingThis
                  ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/25 ring-2 ring-blue-500/30'
                  : viewerManager?.highlightedPlanningObj?.id === obj.id
@@ -1041,26 +1041,40 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                                   <Palette size={14} />
                               </button>
                               {isColorPickerOpen && (
-                                  <div className="absolute right-0 bottom-full mb-1 z-50 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-md p-2.5 flex flex-col gap-2.5 w-40 animate-in fade-in zoom-in-95 duration-200">
-                                      <div className="flex justify-between items-center">
-                                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Color</div>
-                                          <button onClick={() => setIsColorPickerOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                                  <div className="absolute left-0 bottom-full mb-2 z-[100] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-2xl rounded-lg p-2.5 flex flex-col gap-2 w-48 animate-in fade-in zoom-in-95 duration-150">
+                                      <div className="flex justify-between items-center pb-1 border-b border-zinc-100 dark:border-zinc-800">
+                                          <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-widest">Model Color</div>
+                                          <button onClick={() => setIsColorPickerOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-0.5 rounded">
                                               <X size={12} />
                                           </button>
                                       </div>
-                                      <div className="flex gap-1.5 flex-wrap items-center">
+                                      <div className="grid grid-cols-4 gap-1.5 items-center">
                                           {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#64748b', '#ffffff', '#000000'].map(c => (
-                                              <button key={c} onClick={() => {
-                                                  if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
-                                                      viewerManager.updatePlanningObjectColorAndOpacity(obj.id, c, obj.opacity !== undefined ? obj.opacity : 1.0);
-                                                  }
-                                              }} className={`w-5 h-5 rounded-full border border-zinc-300 dark:border-zinc-600 ${obj.color === c ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-zinc-800' : ''}`} style={{ backgroundColor: c }} />
+                                              <button 
+                                                  key={c} 
+                                                  onClick={() => {
+                                                      if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
+                                                          viewerManager.updatePlanningObjectColorAndOpacity(obj.id, c, obj.opacity !== undefined ? obj.opacity : 1.0);
+                                                      }
+                                                  }} 
+                                                  className={`w-6 h-6 rounded-full border border-zinc-300 dark:border-zinc-600 hover:scale-110 transition-transform ${obj.color === c ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-zinc-900' : ''}`} 
+                                                  style={{ backgroundColor: c }} 
+                                                  title={c}
+                                              />
                                           ))}
-                                          <input type="color" value={obj.color || '#3b82f6'} onChange={(e) => {
-                                              if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
-                                                  viewerManager.updatePlanningObjectColorAndOpacity(obj.id, e.target.value, obj.opacity !== undefined ? obj.opacity : 1.0);
-                                              }
-                                          }} className="w-5 h-5 p-0 border-0 rounded overflow-hidden cursor-pointer bg-transparent" />
+                                      </div>
+                                      <div className="flex items-center justify-between pt-1.5 border-t border-zinc-100 dark:border-zinc-800 text-[10px] text-zinc-500">
+                                          <span className="font-medium">Custom Color:</span>
+                                          <input 
+                                              type="color" 
+                                              value={obj.color || '#3b82f6'} 
+                                              onChange={(e) => {
+                                                  if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
+                                                      viewerManager.updatePlanningObjectColorAndOpacity(obj.id, e.target.value, obj.opacity !== undefined ? obj.opacity : 1.0);
+                                                  }
+                                              }} 
+                                              className="w-6 h-6 p-0 border border-zinc-300 dark:border-zinc-700 rounded overflow-hidden cursor-pointer bg-transparent" 
+                                          />
                                       </div>
                                   </div>
                               )}
@@ -1070,24 +1084,33 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                                   <Droplets size={14} />
                               </button>
                               {isOpacitySliderOpen && (
-                                  <div className="absolute right-0 bottom-full mb-1 z-50 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-md p-2.5 flex flex-col gap-2 w-32 animate-in fade-in zoom-in-95 duration-200">
-                                      <div className="flex justify-between items-center mb-1">
-                                          <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Opacity</div>
-                                          <button onClick={() => setIsOpacitySliderOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+                                  <div className="absolute left-0 bottom-full mb-2 z-[100] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-2xl rounded-lg p-2.5 flex flex-col gap-2 w-40 animate-in fade-in zoom-in-95 duration-150">
+                                      <div className="flex justify-between items-center pb-1 border-b border-zinc-100 dark:border-zinc-800">
+                                          <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-widest">Opacity</div>
+                                          <button onClick={() => setIsOpacitySliderOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-0.5 rounded">
                                               <X size={12} />
                                           </button>
                                       </div>
-                                      <div className="flex flex-col gap-1">
+                                      <div className="flex flex-col gap-1.5 pt-1">
                                           <div className="flex justify-between items-center">
-                                              <span className="text-[10px] text-zinc-400 font-mono">
+                                              <span className="text-[10px] text-zinc-400 font-mono">Level:</span>
+                                              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold font-mono">
                                                   {Math.round((obj.opacity !== undefined ? obj.opacity : 1.0) * 100)}%
                                               </span>
                                           </div>
-                                          <input type="range" min="0.1" max="1.0" step="0.05" value={obj.opacity !== undefined ? obj.opacity : 1.0} onChange={(e) => {
-                                              if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
-                                                  viewerManager.updatePlanningObjectColorAndOpacity(obj.id, obj.color || '#3b82f6', parseFloat(e.target.value));
-                                              }
-                                          }} className="w-full h-1 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer" />
+                                          <input 
+                                              type="range" 
+                                              min="0.05" 
+                                              max="1.0" 
+                                              step="0.05" 
+                                              value={obj.opacity !== undefined ? obj.opacity : 1.0} 
+                                              onChange={(e) => {
+                                                  if (viewerManager && typeof viewerManager.updatePlanningObjectColorAndOpacity === 'function') {
+                                                      viewerManager.updatePlanningObjectColorAndOpacity(obj.id, obj.color || '#3b82f6', parseFloat(e.target.value));
+                                                  }
+                                              }} 
+                                              className="w-full h-1 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600" 
+                                          />
                                       </div>
                                   </div>
                               )}

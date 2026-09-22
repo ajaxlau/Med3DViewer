@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useViewer } from '../context/ViewerContext';
 import { ChevronDown, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight } from 'lucide-react';
+import { ModelStatusCard } from './ModelStatusCard';
 
 export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: () => void }) {
   const { 
@@ -686,6 +687,11 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
             </div>
           </div>
         )}
+        </div>
+
+        {/* Model Status Section (Non-retractable / Always Visible) */}
+        <div className="p-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+          <ModelStatusCard />
         </div>
       </div>
     </aside>
