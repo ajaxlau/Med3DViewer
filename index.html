@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NTEC 3D Printing Office - Medical 3D Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <!-- Favicon and Web App Icon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="description" content="NTEC 3D Printing Office - Medical 3DViewer for Anatomy and Sugical Planning Analytics." />
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-PMRERS84H9"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-PMRERS84H9');
+    </script>
+    <!-- Include Three.js for Raycasting & Math utilities to prevent undefined errors -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js" integrity="sha384-B6xO4Jgg0u+mU5RCidCjX9gGXVfcKQqaO289hQ0Vx+dM15uhh+Bt81X49IGCFU1s" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js" integrity="sha384-QF8EmP6pyNE+i7WmcltzC4ddzFVKDxfn5WD5gXyKTSE4SCw0R25TI+q0LUlnf7tq" crossorigin="anonymous"></script>
+    <script>
+      if (window.THREE) {
+          if (!window.THREE.Object3D.prototype.onBeforeRender) {
+              window.THREE.Object3D.prototype.onBeforeRender = function() {};
+          }
+          if (!window.THREE.Object3D.prototype.onAfterRender) {
+              window.THREE.Object3D.prototype.onAfterRender = function() {};
+          }
+          if (window.THREE.Material && !window.THREE.Material.prototype.onBeforeRender) {
+              window.THREE.Material.prototype.onBeforeRender = function() {};
+          }
+          if (window.THREE.BufferGeometry && !window.THREE.BufferGeometry.prototype.onBeforeRender) {
+              window.THREE.BufferGeometry.prototype.onBeforeRender = function() {};
+          }
+          if (window.THREE.Texture && window.THREE.Texture.prototype.channel === undefined) {
+              window.THREE.Texture.prototype.channel = 0;
+          }
+      }
+    </script>
+    <!-- Official Online-3D-Viewer Engine -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/online-3d-viewer@0.18.0/build/engine/o3dv.min.js" integrity="sha384-aSCu7BLnwsK5DndBG6eviyN3/cYpWcaqt+Vev/LH/Jfrs0j3nVDmYIiY8V1bDesK" crossorigin="anonymous"></script>
+  </head>
+  <body>
+    <script>
+      // Clear legacy dev service workers only on local preview servers to prevent caching issues, but allow PWA registration in production
+      if ('serviceWorker' in navigator && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister();
+          }
+        });
+      }
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

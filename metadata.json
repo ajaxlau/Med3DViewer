@@ -1,0 +1,8 @@
+{
+  "name": "Medical 3D Viewer",
+  "description": "Medical 3D Viewer for Anatomy and Surgical Analytics",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
