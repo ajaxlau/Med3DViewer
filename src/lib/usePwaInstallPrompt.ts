@@ -32,7 +32,7 @@ export function usePwaInstallPrompt() {
       setDeferredPrompt(null);
       setIsInstallable(false);
       setIsInstalled(true);
-      console.log('[PWA] 3DViewerPlus successfully installed to device.');
+      console.log('[PWA] Med3DViewer successfully installed to device.');
     };
 
     const handleOnline = () => setIsOnline(true);

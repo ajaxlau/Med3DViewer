@@ -1,5 +1,6 @@
 import { Link, Share2, Ruler, Moon, Sun, PenTool, Camera, RotateCcw, Info } from 'lucide-react';
 import { useViewer } from '../context/ViewerContext';
+import { Tooltip } from './Tooltip';
 
 // Custom icon: 3 parallel menu lines with an overlaid eye, middle line broken around pupil
 export function VisualizationMenuIcon({ size = 18, className = "" }: { size?: number; className?: string }) {
@@ -40,7 +41,7 @@ export function Header({
   } = useViewer();
 
   return (
-    <header className="h-[64px] bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 z-10 shrink-0 md:h-[64px] h-auto py-2 md:py-0 flex-col md:flex-row gap-3 md:gap-0">
+    <header className="h-[64px] bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 z-30 relative shrink-0 md:h-[64px] h-auto py-2 md:py-0 flex-col md:flex-row gap-3 md:gap-0">
       <div className="flex items-center gap-3 font-bold text-[14px] text-zinc-800 dark:text-zinc-100 font-display tracking-tight text-base md:text-lg">
         <img 
           src="./3DPO_Small_Logo.png" 
@@ -53,57 +54,74 @@ export function Header({
       </div>
       
       <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto justify-start md:justify-end text-zinc-500 dark:text-zinc-400">
-        <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={toggleSidebar} title="Toggle Visualization Tools">
-          <VisualizationMenuIcon size={18} />
-        </button>
+        <Tooltip content="Load from URL">
+          <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('url')}>
+            <Link size={18} />
+          </button>
+        </Tooltip>
 
-        <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('url')} title="Load from URL">
-          <Link size={18} />
-        </button>
-        <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('share')} title="Share Model">
-          <Share2 size={18} />
-        </button>
-        <button 
-          className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'snapshot' ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
-          onClick={() => setActiveModal(activeModal === 'snapshot' ? null : 'snapshot')} 
-          title="Snapshot & WhatsApp Share"
-        >
-          <Camera size={18} />
-        </button>
-        <button 
-          className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${rulersVisible ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
-          onClick={toggleRulers} 
-          title="Toggle Rulers"
-        >
-          <Ruler size={18} />
-        </button>
-        <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} title="Toggle Dark Mode">
-          {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-        </button>
+        <Tooltip content="Toggle Visualization Tools">
+          <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={toggleSidebar}>
+            <VisualizationMenuIcon size={18} />
+          </button>
+        </Tooltip>
 
-        <button 
-          className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'info' ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
-          onClick={() => setActiveModal(activeModal === 'info' ? null : 'info')} 
-          title="User Guide & Readme Documentation"
-        >
-          <Info size={18} />
-        </button>
+        <Tooltip content="Share Model">
+          <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('share')}>
+            <Share2 size={18} />
+          </button>
+        </Tooltip>
 
-        <button 
-          className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-red-600 dark:hover:text-red-400 ${activeModal === 'reset' ? 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40' : ''}`} 
-          onClick={() => setActiveModal(activeModal === 'reset' ? null : 'reset')} 
-          title="Reset Workspace (Clear Models & Analytic Items)"
-        >
-          <RotateCcw size={18} />
-        </button>
+        <Tooltip content="Snapshot & WhatsApp Share">
+          <button 
+            className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'snapshot' ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
+            onClick={() => setActiveModal(activeModal === 'snapshot' ? null : 'snapshot')} 
+          >
+            <Camera size={18} />
+          </button>
+        </Tooltip>
 
-        <button 
-          className={`hidden sm:flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`} 
-          onClick={() => setActiveModal(activeModal === 'planning' ? null : 'planning')} 
-          title="3D Interaction Analytic Tools"
-        >
-          <PenTool size={18} />
-        </button>
+        <Tooltip content="Toggle Rulers">
+          <button 
+            className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${rulersVisible ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
+            onClick={toggleRulers} 
+          >
+            <Ruler size={18} />
+          </button>
+        </Tooltip>
+
+        <Tooltip content={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}>
+          <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+            {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+          </button>
+        </Tooltip>
+
+        <Tooltip content="User Guide & Readme Documentation">
+          <button 
+            className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'info' ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
+            onClick={() => setActiveModal(activeModal === 'info' ? null : 'info')} 
+          >
+            <Info size={18} />
+          </button>
+        </Tooltip>
+
+        <Tooltip content="Reset Workspace (Clear Models & Analytic Items)">
+          <button 
+            className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-red-600 dark:hover:text-red-400 ${activeModal === 'reset' ? 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40' : ''}`} 
+            onClick={() => setActiveModal(activeModal === 'reset' ? null : 'reset')} 
+          >
+            <RotateCcw size={18} />
+          </button>
+        </Tooltip>
+
+        <Tooltip content="3D Interaction Analytic Tools">
+          <button 
+            className={`hidden sm:flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`} 
+            onClick={() => setActiveModal(activeModal === 'planning' ? null : 'planning')} 
+          >
+            <PenTool size={18} />
+          </button>
+        </Tooltip>
       </div>
     </header>
   );

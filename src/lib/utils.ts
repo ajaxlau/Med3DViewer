@@ -1,5 +1,5 @@
 /**
- * Utility functions for 3DViewerPlus
+ * Utility functions for Med3DViewer
  */
 
 /**

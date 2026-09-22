@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useViewer } from '../context/ViewerContext';
 import { ChevronDown, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight } from 'lucide-react';
 import { ModelStatusCard } from './ModelStatusCard';
+import { Tooltip } from './Tooltip';
 
 export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: () => void }) {
   const { 
@@ -88,22 +89,24 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-widest font-semibold">Global Opacity</label>
                   <div className="flex items-center gap-1">
-                    <button 
-                      className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                      onClick={invertMeshesVisibility}
-                      disabled={meshes.length === 0}
-                      title="Invert Displayed Models"
-                    >
-                      <ArrowLeftRight size={13} />
-                    </button>
-                    <button 
-                      className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                      onClick={toggleAllMeshesVisibility}
-                      disabled={meshes.length === 0}
-                      title={meshes.length > 0 && meshes.every(m => m.visible !== false) ? "Hide All Models" : "Show All Models"}
-                    >
-                      {meshes.length > 0 && meshes.every(m => m.visible !== false) ? <Eye size={13} /> : <EyeOff size={13} />}
-                    </button>
+                    <Tooltip content="Invert Displayed Models" side="top">
+                      <button 
+                        className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                        onClick={invertMeshesVisibility}
+                        disabled={meshes.length === 0}
+                      >
+                        <ArrowLeftRight size={13} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content={meshes.length > 0 && meshes.every(m => m.visible !== false) ? "Hide All Models" : "Show All Models"} side="top">
+                      <button 
+                        className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                        onClick={toggleAllMeshesVisibility}
+                        disabled={meshes.length === 0}
+                      >
+                        {meshes.length > 0 && meshes.every(m => m.visible !== false) ? <Eye size={13} /> : <EyeOff size={13} />}
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5">
@@ -142,29 +145,31 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
                       <div className="flex justify-between items-center mb-1">
                         <span className="whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]" title={mesh.name}>{mesh.name}</span>
                         <div className="flex items-center gap-0.5">
-                          <button 
-                            className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (viewerManager && typeof viewerManager.duplicateSubmeshToPlanningObjects === 'function') {
-                                viewerManager.duplicateSubmeshToPlanningObjects(mesh.id);
-                                setActiveModal('planning');
-                              }
-                            }}
-                            title="Add / Duplicate to Object List & Analytic Tools"
-                          >
-                            <Copy size={13} />
-                          </button>
-                          <button 
-                            className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleMeshVisibility(mesh.id);
-                            }}
-                            title="Toggle Visibility"
-                          >
-                            {mesh.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                          </button>
+                          <Tooltip content="Add / Duplicate to Object List & Analytic Tools" side="top">
+                            <button 
+                              className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (viewerManager && typeof viewerManager.duplicateSubmeshToPlanningObjects === 'function') {
+                                  viewerManager.duplicateSubmeshToPlanningObjects(mesh.id);
+                                  setActiveModal('planning');
+                                }
+                              }}
+                            >
+                              <Copy size={13} />
+                            </button>
+                          </Tooltip>
+                          <Tooltip content="Toggle Visibility" side="top">
+                            <button 
+                              className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleMeshVisibility(mesh.id);
+                              }}
+                            >
+                              {mesh.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                            </button>
+                          </Tooltip>
                         </div>
                       </div>
                       <div className="flex items-center gap-2.5 opacity-80" onClick={e => e.stopPropagation()}>

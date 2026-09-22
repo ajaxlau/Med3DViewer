@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Cpu, RefreshCw } from 'lucide-react';
 import { detectGpuCapabilities, GpuCapabilities } from '../lib/gpuDetection';
 import { GpuCapabilityCard } from './GpuCapabilityCard';
+import { Tooltip } from './Tooltip';
 
 export function GpuHardwareCard({ className = "" }: { className?: string }) {
   const [capabilities, setCapabilities] = useState<GpuCapabilities | null>(null);
@@ -39,14 +40,15 @@ export function GpuHardwareCard({ className = "" }: { className?: string }) {
           </h4>
         </div>
 
-        <button
-          onClick={handleRecheckGpu}
-          className="flex items-center gap-1 text-[10px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors py-0.5 px-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 cursor-pointer shrink-0"
-          title="Re-probe GPU capabilities"
-        >
-          <RefreshCw size={10} className={loadingGpu ? "animate-spin text-blue-600" : ""} />
-          <span>Re-probe</span>
-        </button>
+        <Tooltip content="Re-probe GPU capabilities" side="left">
+          <button
+            onClick={handleRecheckGpu}
+            className="flex items-center gap-1 text-[10px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors py-0.5 px-2 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 cursor-pointer shrink-0"
+          >
+            <RefreshCw size={10} className={loadingGpu ? "animate-spin text-blue-600" : ""} />
+            <span>Re-probe</span>
+          </button>
+        </Tooltip>
       </div>
 
       {loadingGpu ? (

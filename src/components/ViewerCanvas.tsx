@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { BoxSelect, Camera, Move, RotateCw, Scaling, Info, Plus, Maximize, Loader2, MapPin, X } from 'lucide-react';
+import { BoxSelect, Camera, Move, RotateCw, Scaling, Keyboard, Plus, Maximize, Loader2, MapPin, X } from 'lucide-react';
 import { EndoscopyFlyThroughHUD } from './EndoscopyFlyThroughHUD';
 import { SplineClippingHUD } from './SplineClippingHUD';
 import { GpuHardwareCard } from './GpuHardwareCard';
+import { Tooltip } from './Tooltip';
 
 export function ViewerCanvas() {
   const { 
@@ -146,53 +147,58 @@ export function ViewerCanvas() {
       {/* Transform Floating Buttons */}
       {isTransformActive && activeTransformObjectId && ['plane', 'cylinder', 'custom_model'].includes(planningObjects.find(o => o.id === activeTransformObjectId)?.type || '') && (
         <div className="absolute top-6 right-6 z-20 flex bg-white/90 dark:bg-zinc-800/90 backdrop-blur shadow-md rounded-md p-1 border border-zinc-200 dark:border-zinc-700">
-            <button
-              onClick={() => viewerManager?.setTransformMode('translate')}
-              className={`p-2 rounded ${transformMode === 'translate' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'} transition-colors`}
-              title="Translate"
-            >
-              <Move size={18} />
-            </button>
-            <button
-              onClick={() => viewerManager?.setTransformMode('rotate')}
-              className={`p-2 rounded ${transformMode === 'rotate' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'} transition-colors`}
-              title="Rotate"
-            >
-              <RotateCw size={18} />
-            </button>
+            <Tooltip content="Translate" side="bottom">
+              <button
+                onClick={() => viewerManager?.setTransformMode('translate')}
+                className={`p-2 rounded ${transformMode === 'translate' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'} transition-colors`}
+              >
+                <Move size={18} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Rotate" side="bottom">
+              <button
+                onClick={() => viewerManager?.setTransformMode('rotate')}
+                className={`p-2 rounded ${transformMode === 'rotate' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'} transition-colors`}
+              >
+                <RotateCw size={18} />
+              </button>
+            </Tooltip>
         </div>
       )}
 
       {/* Floating Action Buttons */}
       {!isEmpty && (
         <div ref={menuRef} className="absolute bottom-6 left-6 z-20 flex flex-col-reverse items-center gap-3">
-          <button
-            onClick={() => setShowQuickMenu(!showQuickMenu)}
-            className={`w-12 h-12 rounded-full flex items-center justify-center transition-all focus:outline-none shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95 z-30
-              ${showQuickMenu ? 'bg-zinc-800 text-white dark:bg-white dark:text-zinc-900 rotate-45' : 'bg-gradient-to-tr from-blue-600 to-indigo-500 hover:from-blue-500 hover:to-indigo-400 text-white'}`}
-            title="Quick Menu"
-          >
-            <Plus size={24} className="transition-transform duration-300" />
-          </button>
+          <Tooltip content="Quick Menu" side="right">
+            <button
+              onClick={() => setShowQuickMenu(!showQuickMenu)}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all focus:outline-none shadow-[0_4px_14px_0_rgba(59,130,246,0.39)] hover:shadow-[0_6px_20px_rgba(59,130,246,0.23)] hover:-translate-y-0.5 active:translate-y-0 active:scale-95 z-30
+                ${showQuickMenu ? 'bg-zinc-800 text-white dark:bg-white dark:text-zinc-900 rotate-45' : 'bg-gradient-to-tr from-blue-600 to-indigo-500 hover:from-blue-500 hover:to-indigo-400 text-white'}`}
+            >
+              <Plus size={24} className="transition-transform duration-300" />
+            </button>
+          </Tooltip>
           
           <div className={`flex flex-col gap-3 transition-all duration-300 origin-bottom ${showQuickMenu ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 translate-y-4 pointer-events-none'}`}>
-            <button
-              onClick={handleQuickSnapshotShare}
-              className="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center shadow-lg transition-all hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 focus:outline-none border border-zinc-200 dark:border-zinc-700"
-              title="Share Snapshot"
-            >
-              <Camera size={18} />
-            </button>
+            <Tooltip content="Share Snapshot" side="right">
+              <button
+                onClick={handleQuickSnapshotShare}
+                className="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center shadow-lg transition-all hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 focus:outline-none border border-zinc-200 dark:border-zinc-700"
+              >
+                <Camera size={18} />
+              </button>
+            </Tooltip>
 
             <div ref={infoRef} className="relative">
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }}
-                className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:-translate-y-0.5 active:translate-y-0 active:scale-95 focus:outline-none border
-                  ${showInfo ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50' : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700'}`}
-                title="Shortcuts Info"
-              >
-                <Info size={18} />
-              </button>
+              <Tooltip content="Keyboard Shortcuts" side="right">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowInfo(!showInfo); }}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all hover:-translate-y-0.5 active:translate-y-0 active:scale-95 focus:outline-none border
+                    ${showInfo ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50' : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700'}`}
+                >
+                  <Keyboard size={18} />
+                </button>
+              </Tooltip>
               
               {showInfo && (
                 <div className="absolute bottom-[-10px] left-14 z-20 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md rounded-xl p-5 border border-zinc-200/50 dark:border-zinc-700/50 shadow-xl w-80 pointer-events-auto origin-bottom-left animate-in fade-in zoom-in-95 duration-200">
@@ -321,24 +327,36 @@ export function ViewerCanvas() {
               </span>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center max-w-xl w-full my-auto gap-3.5">
-              <div className="flex flex-col items-center">
-                <BoxSelect size={32} className="text-zinc-300 dark:text-zinc-700 mb-1.5" />
+            <div className="flex flex-col items-center justify-center max-w-xl w-full my-auto gap-4">
+              {/* Outline Frame for Drop 3D Models Handler */}
+              <div 
+                onClick={handleOpenFiles}
+                className="pointer-events-auto w-full cursor-pointer border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500/70 dark:hover:border-blue-500/70 rounded-xl p-6 sm:p-7 bg-zinc-50/50 hover:bg-blue-50/20 dark:bg-zinc-900/30 dark:hover:bg-blue-950/15 transition-all duration-200 flex flex-col items-center group shadow-xs"
+              >
+                <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-zinc-800 border border-blue-100 dark:border-zinc-700 flex items-center justify-center text-blue-600 dark:text-blue-400 mb-2.5 group-hover:scale-105 group-hover:border-blue-300 dark:group-hover:border-blue-500 transition-all">
+                  <BoxSelect size={22} />
+                </div>
                 <h2 className="text-sm sm:text-base text-zinc-800 dark:text-zinc-200 font-bold tracking-tight uppercase mb-0.5">
                   DROP 3D MODELS TO BEGIN
                 </h2>
-                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-2.5 font-mono uppercase tracking-widest">
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mb-3 font-mono uppercase tracking-widest">
                   Supports OBJ · STL · GLTF · GLB · PLY · 3MF
                 </p>
                 <button 
-                  onClick={handleOpenFiles}
-                  className="pointer-events-auto bg-blue-600 hover:bg-blue-700 active:scale-95 text-white border-none py-1.5 px-6 rounded text-xs font-bold uppercase tracking-wider transition-all shadow-xs cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenFiles();
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white border-none py-1.5 px-6 rounded text-xs font-bold uppercase tracking-wider transition-all shadow-xs cursor-pointer"
                 >
                   Browse Files
                 </button>
               </div>
 
-              {/* GPU Hardware Card in single frame below Browse Files */}
+              {/* Separator between Handler and GPU Hardware & Acceleration */}
+              <div className="w-full border-t border-zinc-200 dark:border-zinc-800/80" />
+
+              {/* GPU Hardware Card in single frame below separator */}
               <div className="w-full pointer-events-auto text-left">
                 <GpuHardwareCard />
               </div>

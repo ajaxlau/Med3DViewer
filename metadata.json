@@ -1,6 +1,6 @@
 {
   "name": "Medical 3D Viewer",
-  "description": "Medical 3D Viewer for Anatomy and Surgical Analytics",
+  "description": "A Medical 3D Viewer and Analytic Tool for NTEC 3D Printing Office",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

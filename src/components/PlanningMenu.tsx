@@ -1,6 +1,7 @@
 import { useViewer } from '../context/ViewerContext';
 import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { Tooltip } from './Tooltip';
 
 // Initial default dimensions for planning objects
 const DEFAULT_PLANE_EXT_WIDTH = 10;
@@ -189,27 +190,41 @@ export function PlanningMenu() {
                 /* Quick Micro Icons when Idle & Minimized */
                 <div className="flex items-center justify-between pt-1 text-zinc-500 dark:text-zinc-400">
                   <div className="flex items-center gap-1 overflow-x-auto py-0.5">
-                    <button onClick={() => { setPlanningMode('measure'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-950/40 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors" title="Measure Distance">
-                      <Waypoints size={14} />
-                    </button>
-                    <button onClick={() => { setPlanningMode('angle'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-amber-100 dark:hover:bg-amber-950/40 hover:text-amber-600 dark:hover:text-amber-400 transition-colors" title="Measure Angle">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18" /><path d="M3 21l18-18" /><path d="M13 21a10 10 0 0 0-2.93-7.07" /></svg>
-                    </button>
-                    <button onClick={() => { setPlanningMode('plane'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-blue-100 dark:hover:bg-blue-950/40 hover:text-blue-600 dark:hover:text-blue-400 transition-colors" title="Mark Plane">
-                      <BoxSelect size={14} />
-                    </button>
-                    <button onClick={() => { setPlanningMode('cylinder'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title="Mark Cylinder">
-                      <Crosshair size={14} />
-                    </button>
-                    <button onClick={() => { setPlanningMode('curve'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-pink-100 dark:hover:bg-pink-950/40 hover:text-pink-600 dark:hover:text-pink-400 transition-colors" title="Mark Curve">
-                      <Spline size={14} />
-                    </button>
-                    <button onClick={() => { setPlanningMode('point'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-purple-100 dark:hover:bg-purple-950/40 hover:text-purple-600 dark:hover:text-purple-400 transition-colors" title="Mark Point">
-                      <MapPin size={14} />
-                    </button>
-                    <button onClick={() => { setPlanningMode('annotation'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-sky-100 dark:hover:bg-sky-950/40 hover:text-sky-600 dark:hover:text-sky-400 transition-colors" title="Annotate Pin">
-                      <MessageSquarePlus size={14} />
-                    </button>
+                    <Tooltip content="Measure Distance" side="top">
+                      <button onClick={() => { setPlanningMode('measure'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-950/40 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors">
+                        <Waypoints size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Measure Angle" side="top">
+                      <button onClick={() => { setPlanningMode('angle'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-amber-100 dark:hover:bg-amber-950/40 hover:text-amber-600 dark:hover:text-amber-400 transition-colors">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21h18" /><path d="M3 21l18-18" /><path d="M13 21a10 10 0 0 0-2.93-7.07" /></svg>
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Mark Plane" side="top">
+                      <button onClick={() => { setPlanningMode('plane'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-blue-100 dark:hover:bg-blue-950/40 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                        <BoxSelect size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Mark Cylinder" side="top">
+                      <button onClick={() => { setPlanningMode('cylinder'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                        <Crosshair size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Mark Curve" side="top">
+                      <button onClick={() => { setPlanningMode('curve'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-pink-100 dark:hover:bg-pink-950/40 hover:text-pink-600 dark:hover:text-pink-400 transition-colors">
+                        <Spline size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Mark Point" side="top">
+                      <button onClick={() => { setPlanningMode('point'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-purple-100 dark:hover:bg-purple-950/40 hover:text-purple-600 dark:hover:text-purple-400 transition-colors">
+                        <MapPin size={14} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Annotate Pin" side="top">
+                      <button onClick={() => { setPlanningMode('annotation'); setIsToolsExpanded(true); }} className="p-1.5 rounded hover:bg-sky-100 dark:hover:bg-sky-950/40 hover:text-sky-600 dark:hover:text-sky-400 transition-colors">
+                        <MessageSquarePlus size={14} />
+                      </button>
+                    </Tooltip>
                   </div>
                   <button 
                     onClick={() => setIsToolsExpanded(true)}
@@ -981,16 +996,18 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                           {localPos.x !== undefined && <span className="ml-2 text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}</span>}
                       </span>
                   )}
+                  {obj.type === 'custom_model' && localPos.x !== undefined && (
+                      <span className="text-[11px] font-mono leading-tight whitespace-nowrap tracking-tight text-zinc-500 dark:text-zinc-400">
+                          <span className="text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}</span>
+                      </span>
+                  )}
                   {obj.type === 'annotation' && (
                       <div className="flex flex-col gap-1 w-full mt-0.5">
-                          <div className="flex items-center gap-1 text-[11px] font-mono leading-tight whitespace-nowrap tracking-tight text-sky-600 dark:text-sky-400 font-bold">
-                              <span>Pin: 3D Note</span>
-                              {localPos.x !== undefined && (
-                                  <span className="ml-2 text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">
-                                      Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}
-                                  </span>
-                              )}
-                          </div>
+                          {localPos.x !== undefined && (
+                              <div className="text-[9px] font-mono leading-tight whitespace-nowrap tracking-tight text-zinc-400 dark:text-zinc-500 font-normal">
+                                  Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}
+                              </div>
+                          )}
                           <input
                               type="text"
                               className="text-[11px] bg-white/70 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-700/60 rounded px-1.5 py-0.5 w-full placeholder-zinc-400 text-zinc-700 dark:text-zinc-200 focus:ring-1 focus:ring-sky-500 font-normal"
@@ -1028,11 +1045,6 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                       >
                           <MapPin size={14} className={resnappingAnnotationId === obj.id ? "animate-pulse" : ""} />
                       </button>
-                  )}
-                  {obj.type === 'custom_model' && (
-                      <span className="text-[11px] font-mono leading-tight whitespace-nowrap tracking-tight">
-                          {localPos.x !== undefined && <span className="ml-2 text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}</span>}
-                      </span>
                   )}
                   {obj.type === 'custom_model' && (
                       <div ref={popoverRef} className="flex items-center gap-0.5">

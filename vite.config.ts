@@ -15,9 +15,9 @@ export default defineConfig(() => {
         injectRegister: 'auto',
         includeAssets: ['favicon.ico', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'masked-icon.svg', '3DPO_Small_Logo.png'],
         manifest: {
-          name: 'NTEC 3D Printing Office - New3DViewer',
-          short_name: '3DViewerPlus',
-          description: 'A 3D Model Viewer and miniVSP for NTEC 3D Printing Office',
+          name: 'NTEC3DPO - Med3DViewer',
+          short_name: 'Med3DViewer',
+          description: 'A Medical 3D Model Viewer and Analytic Tool for NTEC 3D Printing Office',
           theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',

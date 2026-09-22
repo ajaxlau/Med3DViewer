@@ -116,11 +116,11 @@ function MainLayout() {
 
   return (
     <div className="flex flex-col h-dvh w-dvw overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-200 transition-colors">
-      <div className="flex flex-col flex-1 overflow-hidden ">
+      <div className="flex flex-col flex-1 min-h-0">
         <Header 
           toggleSidebar={toggleSidebar}
         />
-        <div className="flex flex-1 min-h-0 relative flex-col md:flex-row">
+        <div className="flex flex-1 min-h-0 relative flex-col md:flex-row overflow-hidden">
           <Sidebar collapsed={sidebarCollapsed} onClose={() => {
             setSidebarCollapsed(true);
             setTimeout(() => {
