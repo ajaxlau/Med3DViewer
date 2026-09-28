@@ -61,10 +61,16 @@ export function GpuCapabilityCard({ capabilities, compact = false }: GpuCapabili
             <span className="text-zinc-500 dark:text-zinc-400">Pipeline:</span>
             <span className="text-zinc-800 dark:text-zinc-200 truncate max-w-[140px]">{capabilities.architecture}</span>
           </div>
+          <div className="flex justify-between items-center py-0.5 border-b border-zinc-200/60 dark:border-zinc-800/60">
+            <span className="text-zinc-500 dark:text-zinc-400">Profile / DPR:</span>
+            <span className="text-zinc-800 dark:text-zinc-200 font-semibold truncate max-w-[140px]">
+              {capabilities.isLowMemoryDevice ? 'Low-Mem' : 'High-Perf'} · {capabilities.recommendedPixelRatio}x
+            </span>
+          </div>
           <div className="flex justify-between items-center py-0.5">
-            <span className="text-zinc-500 dark:text-zinc-400">Workgroup / Buffer:</span>
+            <span className="text-zinc-500 dark:text-zinc-400">Workgroup / Budget:</span>
             <span className="text-zinc-800 dark:text-zinc-200 font-semibold">
-              {capabilities.maxComputeWorkgroupSizeX || 256} · {capabilities.maxStorageBufferBindingSize ? `${(capabilities.maxStorageBufferBindingSize / (1024 * 1024)).toFixed(0)} MB` : '128 MB'}
+              {capabilities.maxComputeWorkgroupSizeX || 256} · {capabilities.memoryBudgetMB || 256} MB
             </span>
           </div>
         </div>

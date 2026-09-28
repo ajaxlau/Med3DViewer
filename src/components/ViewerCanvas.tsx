@@ -306,7 +306,7 @@ export function ViewerCanvas() {
       {/* Empty State / Initial Landing / Loading state */}
       {isEmpty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none z-15 bg-white dark:bg-zinc-950 p-4 sm:p-6 overflow-hidden">
-          {(status.includes('Loading') || status.includes('Parsing')) ? (
+          {(status.includes('Loading') || status.includes('Parsing') || status.includes('Reading') || status.includes('Analyzing') || status.includes('Processing') || status.includes('Compiling') || status.includes('Activating') || (loadingProgress > 0 && loadingProgress < 100)) ? (
             <div className="flex flex-col items-center justify-center max-w-sm px-6 my-auto">
               <Loader2 size={40} className="animate-spin text-blue-600 dark:text-blue-400 mb-3" />
               <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-1 tracking-tight uppercase">

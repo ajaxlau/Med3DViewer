@@ -46,11 +46,15 @@ An interactive, high-performance web-based 3D Medical Model Viewer, Virtual Surg
   * Real-time visual rotation angle arcs, translation trajectory delta lines, and HUD badges indicating exact displacements.
   * Full matrix world synchronization and coordinate inheritance across duplications.
 
-### 5. ⚡ WebGPU / WebGL2 Hardware Acceleration & Resilience
+### 5. ⚡ WebGPU / WebGL2 Hardware Acceleration & Low-Memory Engine
 * **Multi-Tier Graphics Pipeline**: Automatically detects and leverages WebGPU when supported, with seamless fallback to WebGL 2.0 or legacy hardware compatibility mode.
+* **Low-Memory & Mobile Device Protection**: Automatically profiles available device memory (`navigator.deviceMemory`), hardware concurrency, mobile user agents, and GPU capabilities.
+* **Viewport DPR Capping**: Dynamically caps device pixel ratio to 1.0x on low-memory mobile devices to eliminate multi-million pixel framebuffer VRAM spikes on Retina and high-DPI screens.
+* **Aggressive Scene Buffer Purging**: Deeply deallocates previous geometries, typed arrays (`Float32Array`), materials, textures, and renderer renderLists upon model unloads and workspace resets to prevent mobile tab memory exhaustion.
+* **Direct ArrayBuffer STLLoader Fallback**: Built-in Three.js STLLoader fallback automatically recovers and directly streams binary STL geometries when browser memory limits or external importers stall.
+* **Extended Mobile Loading Timeout & Progressive HUD**: Resilient 300-second parsing window with real-time stage updates (reading, buffer allocation, shader compilation) tailored for low-power mobile CPUs.
 * **Context Loss Protection**: Built-in WebGL context loss listeners (`webglcontextlost` / `webglcontextrestored`) that gracefully suspend operations and automatically reconstruct scenes upon GPU driver recovery.
-* **Adaptive Fill-Rate Optimization**: Automatically tunes device pixel ratio and procedural geometry complexity to match GPU capabilities, maintaining high frame rates.
-* **GPU Diagnostic Inspector**: Interactive hardware diagnostic modal detailing GPU vendor, renderer, shader architecture, and real-time status.
+* **GPU Diagnostic & Optimization Guide**: Interactive hardware diagnostic modal and dedicated Low-Memory Model Guide detailing polygon budgets, binary STL formats, and decimation best practices.
 
 ### 6. 🗂️ Planning Object & Group Hierarchy Management
 * **Group Management**: Organize planning elements into custom named folders and collapsible groups with bulk visibility controls.

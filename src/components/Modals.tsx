@@ -6,6 +6,7 @@ import { RotateCcw, AlertTriangle } from 'lucide-react';
 import logoImg from '../assets/logo.png';
 import { GpuStatusModal } from './GpuStatusModal';
 import { InfoModal } from './InfoModal';
+import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
 
 export function Modals() {
@@ -616,6 +617,14 @@ export function Modals() {
         {/* -- GPU STATUS & HARDWARE ACCELERATION MODAL -- */}
         {activeModal === 'gpu-status' && (
           <GpuStatusModal onClose={() => setActiveModal(null)} />
+        )}
+
+        {/* -- LARGE MODEL & LOW-MEMORY OPTIMIZATION GUIDE MODAL -- */}
+        {activeModal === 'large-model-guide' && (
+          <LargeModelGuideModal
+            onClose={() => setActiveModal(null)}
+            onOpenGpuStatus={() => setActiveModal('gpu-status')}
+          />
         )}
 
       </div>

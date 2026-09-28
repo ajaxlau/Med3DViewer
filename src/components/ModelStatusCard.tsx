@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { Activity, FileCode, Loader2 } from 'lucide-react';
+import { Activity, FileCode, Loader2, HelpCircle } from 'lucide-react';
 import { ModelStats } from '../lib/ViewerManager';
 
 export function ModelStatusCard({ className = "" }: { className?: string }) {
-  const { status, loadingProgress, isEmpty, filename, meshes, viewerManager } = useViewer();
+  const { status, loadingProgress, isEmpty, filename, meshes, viewerManager, setActiveModal } = useViewer();
   const [modelStats, setModelStats] = useState<ModelStats | null>(null);
 
   useEffect(() => {
@@ -16,35 +16,46 @@ export function ModelStatusCard({ className = "" }: { className?: string }) {
     }
   }, [viewerManager, isEmpty, meshes, filename]);
 
-  const isLoading = status.includes('Loading') || status.includes('Parsing') || (loadingProgress > 0 && loadingProgress < 100);
+  const isLoading = status.includes('Loading') || status.includes('Parsing') || status.includes('Reading') || (loadingProgress > 0 && loadingProgress < 100);
+  const isErrorOrMemoryNotice = status.includes('Error') || status.includes('Memory') || status.includes('timed out');
 
   return (
     <div className={`bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5 text-[13px] text-zinc-600 dark:text-zinc-400 shadow-xs flex flex-col gap-3 ${className}`}>
       {/* Header */}
-      <div className="flex items-center gap-2.5 pb-2.5 border-b border-zinc-100 dark:border-zinc-800/80">
-        <div className="w-7 h-7 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-          <Activity size={15} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="text-[11px] font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-100">
-            Model Status
-          </h4>
-          <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
-            <span className="relative flex h-2 w-2 shrink-0">
-              {isLoading && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                status.includes('Error') ? 'bg-red-500' :
-                isLoading ? 'bg-blue-500' :
-                isEmpty ? 'bg-zinc-400 dark:bg-zinc-600' : 'bg-emerald-500 dark:bg-emerald-400'
-              }`}></span>
-            </span>
-            <span className="truncate">
-              {isLoading ? 'Active Process' : status.includes('Error') ? 'Error' : isEmpty ? 'Ready / Standby' : 'Model Active'}
-            </span>
+      <div className="flex items-center justify-between pb-2.5 border-b border-zinc-100 dark:border-zinc-800/80">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+            <Activity size={15} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-[11px] font-bold uppercase tracking-wider text-zinc-800 dark:text-zinc-100">
+              Model Status
+            </h4>
+            <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
+              <span className="relative flex h-2 w-2 shrink-0">
+                {isLoading && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                  status.includes('Error') ? 'bg-red-500' :
+                  isLoading ? 'bg-blue-500' :
+                  isEmpty ? 'bg-zinc-400 dark:bg-zinc-600' : 'bg-emerald-500 dark:bg-emerald-400'
+                }`}></span>
+              </span>
+              <span className="truncate">
+                {isLoading ? 'Active Process' : status.includes('Error') ? 'Error' : isEmpty ? 'Ready / Standby' : 'Model Active'}
+              </span>
+            </div>
           </div>
         </div>
+
+        <button
+          onClick={() => setActiveModal('large-model-guide')}
+          className="text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          title="Model Loading & Memory Guide"
+        >
+          <HelpCircle size={15} />
+        </button>
       </div>
 
       {/* Content */}
@@ -128,6 +139,16 @@ export function ModelStatusCard({ className = "" }: { className?: string }) {
             <p className="whitespace-pre-line text-xs font-medium text-zinc-500 dark:text-zinc-400 text-center">
               {status ? status.replace(/\*\*/g, '') : 'No model loaded into workspace.'}
             </p>
+            {isErrorOrMemoryNotice && (
+              <div className="mt-2 text-center">
+                <button
+                  onClick={() => setActiveModal('large-model-guide')}
+                  className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                >
+                  View Low-Memory & Optimization Guide →
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -5907,14 +5907,26 @@ It contains both Slicer markup properties and the application's internal groupin
     };
     return (l && ((f as any).appMetaData = l), JSON.stringify(f, null, 2));
   }
-  async loadSlicerMarkupsJson(i) {
+  async loadSlicerMarkupsJson(i: any) {
     var s, c, f, d, h, m, x, b, y, w, C, k, z, _, N, O, j, V, U, $, q, G;
-    if (!i || !i.markups || !window.THREE) return;
-    const r = i.groupName || "Imported Slicer Group";
+    if (!i || !window.THREE) return;
+    // Handle both 3D Slicer container schema ({ markups: [...] }) and direct single markup object ({ type: "Fiducial", controlPoints: [...] })
+    let markupsList = [];
+    if (Array.isArray(i)) {
+      markupsList = i;
+    } else if (Array.isArray(i.markups)) {
+      markupsList = i.markups;
+    } else if (i.controlPoints || (i.center && i.orientation) || i.type === "Markups" || i.type === "Fiducial" || i.type === "Line" || i.type === "Curve" || i.type === "Angle" || i.type === "Plane") {
+      markupsList = [i];
+    }
+    if (markupsList.length === 0) return;
+
+    const rootModel = this.getModelRoot();
+    const r = i.groupName || (markupsList[0] && markupsList[0].name ? `Slicer: ${markupsList[0].name}` : "Imported Slicer Group");
     let l = "",
       u = this.planningGroups.find((X) => X.name === r);
     u ? (l = u.id) : (l = this.addPlanningGroup(r));
-    for (const X of i.markups) {
+    for (const X of markupsList) {
       const R = ((s = X.properties) == null ? void 0 : s.customType) || X.type;
       let Z = X.coordinateSystem || i.coordinateSystem || "LPS";
       Z = Z.toUpperCase();
@@ -5938,6 +5950,16 @@ It contains both Slicer markup properties and the application's internal groupin
           let M = D[0],
             B = D[1],
             A = D[2];
+          // Slicer markup files default to LPS. If RAS is specified, convert to LPS
+          if (Z === "RAS") {
+            M = -M;
+            B = -B;
+          }
+          if (rootModel && window.THREE) {
+            const v = new window.THREE.Vector3(M, B, A);
+            v.applyMatrix4(rootModel.matrixWorld);
+            return { x: v.x, y: v.y, z: v.z };
+          }
           return { x: M, y: B, z: A };
         },
         de = (X.controlPoints || []).map((D) => I(D.position));
@@ -6121,13 +6143,31 @@ It contains both Slicer markup properties and the application's internal groupin
               ));
           }
         } else if (X.center && X.orientation && X.size) {
-          let D = { x: X.center[0], y: X.center[1], z: X.center[2] };
+          let cx = X.center[0],
+            cy = X.center[1],
+            cz = X.center[2];
+          if (Z === "RAS") {
+            cx = -cx;
+            cy = -cy;
+          }
           const M = (Ne, De, Oe) => new window.THREE.Vector3(Ne, De, Oe),
-            B = X.orientation,
-            A = M(B[0], B[3], B[6]),
-            Q = M(B[1], B[4], B[7]),
-            W = new window.THREE.Vector3(D.x, D.y, D.z),
-            oe = X.size[0] || 100,
+            B = X.orientation;
+          let A = M(B[0], B[3], B[6]),
+            Q = M(B[1], B[4], B[7]);
+          if (Z === "RAS") {
+            A.x = -A.x;
+            A.y = -A.y;
+            Q.x = -Q.x;
+            Q.y = -Q.y;
+          }
+          let W = new window.THREE.Vector3(cx, cy, cz);
+          if (rootModel && window.THREE) {
+            W.applyMatrix4(rootModel.matrixWorld);
+            const rotMat = new window.THREE.Matrix4().extractRotation(rootModel.matrixWorld);
+            A.applyMatrix4(rotMat).normalize();
+            Q.applyMatrix4(rotMat).normalize();
+          }
+          const oe = X.size[0] || 100,
             ze = X.size[1] || 100,
             ye = new window.THREE.Vector3()
               .copy(W)
@@ -6523,11 +6563,13 @@ It contains both Slicer markup properties and the application's internal groupin
       try {
         const c = await i.text(),
           f = JSON.parse(c);
-        f && f.appMetaData
-          ? await this._recreatePlanningObjects(f.appMetaData)
-          : f && f.markups
-            ? await this.loadSlicerMarkupsJson(f)
-            : f && f.objects && (await this._recreatePlanningObjects(f));
+        if (f && f.appMetaData) {
+          await this._recreatePlanningObjects(f.appMetaData);
+        } else if (f && (f.markups || f.controlPoints || (f.center && f.orientation) || Array.isArray(f) || (f.type && ["Markups", "Fiducial", "Line", "Curve", "Angle", "Plane"].includes(f.type)))) {
+          await this.loadSlicerMarkupsJson(f);
+        } else if (f && f.objects) {
+          await this._recreatePlanningObjects(f);
+        }
       } catch (c) {
         console.error("Failed to parse standalone config JSON:", c);
       }
@@ -6604,7 +6646,7 @@ It contains both Slicer markup properties and the application's internal groupin
           }
       }
       if (h && h.appMetaData) h = h.appMetaData;
-      else if (h && h.markups && (!h.objects || h.objects.length === 0)) {
+      else if (h && (h.markups || h.controlPoints || (h.center && h.orientation) || Array.isArray(h) || (h.type && ["Markups", "Fiducial", "Line", "Curve", "Angle", "Plane"].includes(h.type))) && (!h.objects || h.objects.length === 0)) {
         await this.loadSlicerMarkupsJson(h);
         return;
       }
