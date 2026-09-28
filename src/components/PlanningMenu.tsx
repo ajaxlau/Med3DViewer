@@ -1168,7 +1168,7 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                   )}
                   {obj.type === 'point' && obj.diameter !== undefined && (
                       <span className="text-[11px] font-mono leading-tight whitespace-nowrap tracking-tight text-purple-600 dark:text-purple-400 font-bold">
-                          D: {(obj.diameter ?? 0.6).toFixed(1)} mm
+                          D: {(obj.diameter ?? 1.0).toFixed(1)} mm
                           {localPos.x !== undefined && <span className="ml-2 text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}</span>}
                       </span>
                   )}
