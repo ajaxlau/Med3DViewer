@@ -60,7 +60,7 @@ export function Header({
           </button>
         </Tooltip>
 
-        <Tooltip content="Toggle Visualization Tools">
+        <Tooltip content="Visualization Tools">
           <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={toggleSidebar}>
             <VisualizationMenuIcon size={18} />
           </button>
@@ -81,7 +81,7 @@ export function Header({
           </button>
         </Tooltip>
 
-        <Tooltip content="Toggle Rulers">
+        <Tooltip content="Rulers">
           <button 
             className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${rulersVisible ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
             onClick={toggleRulers} 
@@ -90,13 +90,13 @@ export function Header({
           </button>
         </Tooltip>
 
-        <Tooltip content={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}>
+        <Tooltip content={theme === 'light' ? 'Dark Mode' : 'Light Mode'}>
           <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
             {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
           </button>
         </Tooltip>
 
-        <Tooltip content="User Guide & Readme Documentation">
+        <Tooltip content="Readme">
           <button 
             className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'info' ? 'text-blue-600 dark:text-blue-400 bg-zinc-100 dark:bg-zinc-800' : ''}`} 
             onClick={() => setActiveModal(activeModal === 'info' ? null : 'info')} 
@@ -105,7 +105,7 @@ export function Header({
           </button>
         </Tooltip>
 
-        <Tooltip content="Reset Workspace (Clear Models & Analytic Items)">
+        <Tooltip content="Reset Workspace">
           <button 
             className={`w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-red-600 dark:hover:text-red-400 ${activeModal === 'reset' ? 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40' : ''}`} 
             onClick={() => setActiveModal(activeModal === 'reset' ? null : 'reset')} 
@@ -114,7 +114,7 @@ export function Header({
           </button>
         </Tooltip>
 
-        <Tooltip content="3D Interaction Analytic Tools">
+        <Tooltip content="Analytic Tools">
           <button 
             className={`hidden sm:flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`} 
             onClick={() => setActiveModal(activeModal === 'planning' ? null : 'planning')} 

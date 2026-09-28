@@ -1,7 +1,8 @@
 import { useViewer } from '../context/ViewerContext';
-import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff } from 'lucide-react';
+import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff, Layers } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { Tooltip } from './Tooltip';
+import { shouldIgnoreHover } from '../lib/utils';
 
 // Initial default dimensions for planning objects
 const DEFAULT_PLANE_EXT_WIDTH = 10;
@@ -22,14 +23,31 @@ export function PlanningMenu() {
   const [newGroupName, setNewGroupName] = useState('');
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  
+  // Analytics retractable state
   const [isToolsExpanded, setIsToolsExpanded] = useState(true);
   const [isToolsPinned, setIsToolsPinned] = useState(false);
   const toolsContainerRef = useRef<HTMLDivElement>(null);
   const collapseTimerRef = useRef<any>(null);
+
+  // Project IO retractable state
+  const [isProjectIoExpanded, setIsProjectIoExpanded] = useState(true);
+  const [isProjectIoPinned, setIsProjectIoPinned] = useState(false);
+  const projectIoContainerRef = useRef<HTMLDivElement>(null);
+  const projectIoTimerRef = useRef<any>(null);
+
+  // Object List retractable state
+  const [isObjectListExpanded, setIsObjectListExpanded] = useState(true);
+  const [isObjectListPinned, setIsObjectListPinned] = useState(false);
+  const objectListContainerRef = useRef<HTMLDivElement>(null);
+  const objectListTimerRef = useRef<any>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stlInputRef = useRef<HTMLInputElement>(null);
 
+  // Analytics hover handlers
   const handleToolsMouseEnter = () => {
+    if (shouldIgnoreHover()) return;
     if (collapseTimerRef.current) {
       clearTimeout(collapseTimerRef.current);
       collapseTimerRef.current = null;
@@ -40,6 +58,7 @@ export function PlanningMenu() {
   };
 
   const handleToolsMouseLeave = () => {
+    if (shouldIgnoreHover()) return;
     if (isToolsPinned) return;
     if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
     collapseTimerRef.current = setTimeout(() => {
@@ -50,9 +69,59 @@ export function PlanningMenu() {
     }, 350);
   };
 
+  // Project IO hover handlers
+  const handleProjectIoMouseEnter = () => {
+    if (shouldIgnoreHover()) return;
+    if (projectIoTimerRef.current) {
+      clearTimeout(projectIoTimerRef.current);
+      projectIoTimerRef.current = null;
+    }
+    if (!isProjectIoPinned) {
+      setIsProjectIoExpanded(true);
+    }
+  };
+
+  const handleProjectIoMouseLeave = () => {
+    if (shouldIgnoreHover()) return;
+    if (isProjectIoPinned) return;
+    if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+    projectIoTimerRef.current = setTimeout(() => {
+      if (projectIoContainerRef.current?.contains(document.activeElement)) {
+        return;
+      }
+      setIsProjectIoExpanded(false);
+    }, 350);
+  };
+
+  // Object List hover handlers
+  const handleObjectListMouseEnter = () => {
+    if (shouldIgnoreHover()) return;
+    if (objectListTimerRef.current) {
+      clearTimeout(objectListTimerRef.current);
+      objectListTimerRef.current = null;
+    }
+    if (!isObjectListPinned) {
+      setIsObjectListExpanded(true);
+    }
+  };
+
+  const handleObjectListMouseLeave = () => {
+    if (shouldIgnoreHover()) return;
+    if (isObjectListPinned) return;
+    if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
+    objectListTimerRef.current = setTimeout(() => {
+      if (objectListContainerRef.current?.contains(document.activeElement)) {
+        return;
+      }
+      setIsObjectListExpanded(false);
+    }, 350);
+  };
+
   useEffect(() => {
     return () => {
       if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+      if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+      if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
     };
   }, []);
   
@@ -119,7 +188,7 @@ export function PlanningMenu() {
                 <Waypoints size={15} />
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 truncate">
-                Tools
+                Analytics
               </span>
 
               {/* Status Badge */}
@@ -154,7 +223,7 @@ export function PlanningMenu() {
               <button
                 onClick={() => setIsToolsExpanded(!isToolsExpanded)}
                 className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isToolsExpanded ? "Minimize tools section" : "Expand tools section"}
+                title={isToolsExpanded ? "Minimize analytics section" : "Expand analytics section"}
               >
                 {isToolsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               </button>
@@ -530,12 +599,62 @@ export function PlanningMenu() {
           </div>
         </div>
 
-        <div className="border-t border-zinc-200 dark:border-zinc-800 pt-4 mt-2">
-            <div className="flex flex-col gap-2 mb-3">
-                <div className="flex items-center justify-between">
-                    <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest">Project IO</h4>
-                </div>
-                <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded p-1.5 px-3">
+        {/* Retractable Project IO Section */}
+        <div 
+          ref={projectIoContainerRef}
+          onMouseEnter={handleProjectIoMouseEnter}
+          onMouseLeave={handleProjectIoMouseLeave}
+          className="flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/60 transition-all duration-300"
+        >
+          {/* Project IO Header */}
+          <div 
+            onClick={() => setIsProjectIoExpanded(!isProjectIoExpanded)}
+            className="flex items-center justify-between px-3 py-2 cursor-pointer select-none hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 transition-colors rounded-t-lg"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-zinc-500 dark:text-zinc-400">
+                <Save size={15} />
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 truncate">
+                Project IO
+              </span>
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-200/70 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
+                ZIP / STL
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsProjectIoPinned(!isProjectIoPinned)}
+                className={`p-1 rounded transition-colors ${
+                  isProjectIoPinned 
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
+                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
+                }`}
+                title={isProjectIoPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
+              >
+                {isProjectIoPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
+              </button>
+
+              <button
+                onClick={() => setIsProjectIoExpanded(!isProjectIoExpanded)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
+                title={isProjectIoExpanded ? "Minimize project IO section" : "Expand project IO section"}
+              >
+                {isProjectIoExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded Project IO Grid */}
+          <div 
+            className={`grid transition-all duration-300 ease-in-out ${
+              isProjectIoExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="p-2.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/70">
+                <div className="flex items-center justify-between bg-white dark:bg-zinc-950/60 border border-zinc-200/80 dark:border-zinc-800 rounded p-1.5 px-3">
                     <div className="flex items-center gap-4">
                         {/* Open Button */}
                         <button 
@@ -637,183 +756,240 @@ export function PlanningMenu() {
                         </div>
                     )}
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Retractable Object List Section */}
+        <div 
+          ref={objectListContainerRef}
+          onMouseEnter={handleObjectListMouseEnter}
+          onMouseLeave={handleObjectListMouseLeave}
+          className="flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/60 transition-all duration-300"
+        >
+          {/* Object List Header */}
+          <div 
+            onClick={() => setIsObjectListExpanded(!isObjectListExpanded)}
+            className="flex items-center justify-between px-3 py-2 cursor-pointer select-none hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 transition-colors rounded-t-lg"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-zinc-500 dark:text-zinc-400">
+                <Layers size={15} />
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-200 truncate">
+                Object List
+              </span>
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-200/70 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
+                {planningObjects.length} Object{planningObjects.length !== 1 ? 's' : ''}
+              </span>
             </div>
 
-            {/* Inline Group Creation Form */}
-            <div className="flex gap-2 mb-4 bg-zinc-50 dark:bg-zinc-900/60 p-2 rounded border border-zinc-100 dark:border-zinc-800">
-                <input 
-                    type="text" 
-                    placeholder="Create Object Group..." 
-                    className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-[11px] rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
-                    value={newGroupName}
-                    onChange={(e) => setNewGroupName(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleCreateGroup();
-                    }}
-                />
-                <button 
-                    onClick={handleCreateGroup} 
-                    className="px-2 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] flex items-center gap-1 transition shadow-sm shrink-0"
-                    title="Create Group"
-                >
-                    <FolderPlus size={12} />
-                    <span>Group</span>
-                </button>
-            </div>
-            
-            <div className="flex items-center justify-between mb-3 mt-4">
-                <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest">Object List</h4>
-            </div>
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsObjectListPinned(!isObjectListPinned)}
+                className={`p-1 rounded transition-colors ${
+                  isObjectListPinned 
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
+                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
+                }`}
+                title={isObjectListPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
+              >
+                {isObjectListPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
+              </button>
 
-            {planningObjects.length === 0 && (
-                <div className="text-center text-xs text-zinc-500 py-4 opacity-70">
-                    No objects created yet.
+              <button
+                onClick={() => setIsObjectListExpanded(!isObjectListExpanded)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
+                title={isObjectListExpanded ? "Minimize object list section" : "Expand object list section"}
+              >
+                {isObjectListExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Expanded Object List Grid */}
+          <div 
+            className={`grid transition-all duration-300 ease-in-out ${
+              isObjectListExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="p-2.5 pt-2 border-t border-zinc-200/70 dark:border-zinc-800/70 flex flex-col gap-3">
+                {/* Inline Group Creation Form */}
+                <div className="flex gap-2 bg-white dark:bg-zinc-950/60 p-2 rounded border border-zinc-200/80 dark:border-zinc-800">
+                    <input 
+                        type="text" 
+                        placeholder="Create Object Group..." 
+                        className="flex-1 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-[11px] rounded px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCreateGroup();
+                        }}
+                    />
+                    <button 
+                        onClick={handleCreateGroup} 
+                        className="px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] flex items-center gap-1 transition shadow-sm shrink-0"
+                        title="Create Group"
+                    >
+                        <FolderPlus size={12} />
+                        <span>Group</span>
+                    </button>
                 </div>
-            )}
 
-            {planningObjects.length > 0 && (
-                <div className="flex flex-col gap-3">
-                    {/* Render custom groups */}
-                    {planningGroups.map(group => {
-                        const groupObjects = planningObjects.filter(obj => obj.groupId === group.id);
-                        return (
-                            <div 
-                                key={group.id} 
-                                className="border border-zinc-200 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white dark:bg-zinc-900 shadow-sm"
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    const draggedId = e.dataTransfer.getData('text/plain');
-                                    if (draggedId && viewerManager) {
-                                        viewerManager.setPlanningObjectGroupId(draggedId, group.id);
-                                    }
-                                }}
-                            >
-                                <div className="flex items-center gap-1 bg-zinc-100/50 dark:bg-zinc-800/60 px-2 py-1.5 border-b border-zinc-200 dark:border-zinc-800 justify-between">
-                                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                        <button 
-                                            onClick={() => viewerManager?.setPlanningGroupCollapsed(group.id, !group.isCollapsed)} 
-                                            className="p-1 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition shrink-0"
-                                        >
-                                            {group.isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                                        </button>
-                                        <Folder size={13} className="text-blue-500 dark:text-blue-400 shrink-0" />
+                {planningObjects.length === 0 && (
+                    <div className="text-center text-xs text-zinc-500 py-4 opacity-70">
+                        No objects created yet.
+                    </div>
+                )}
+
+                {planningObjects.length > 0 && (
+                    <div className="flex flex-col gap-3">
+                        {/* Render custom groups */}
+                        {planningGroups.map(group => {
+                            const groupObjects = planningObjects.filter(obj => obj.groupId === group.id);
+                            return (
+                                <div 
+                                    key={group.id} 
+                                    className="border border-zinc-200 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white dark:bg-zinc-900 shadow-sm"
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        const draggedId = e.dataTransfer.getData('text/plain');
+                                        if (draggedId && viewerManager) {
+                                            viewerManager.setPlanningObjectGroupId(draggedId, group.id);
+                                        }
+                                    }}
+                                >
+                                    <div className="flex items-center gap-1 bg-zinc-100/50 dark:bg-zinc-800/60 px-2 py-1.5 border-b border-zinc-200 dark:border-zinc-800 justify-between">
+                                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                            <button 
+                                                onClick={() => viewerManager?.setPlanningGroupCollapsed(group.id, !group.isCollapsed)} 
+                                                className="p-1 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition shrink-0"
+                                            >
+                                                {group.isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                                            </button>
+                                            <Folder size={13} className="text-blue-500 dark:text-blue-400 shrink-0" />
+                                            
+                                            <input 
+                                                type="text" 
+                                                className="text-[11px] font-bold bg-transparent border-none text-zinc-800 dark:text-zinc-100 focus:bg-white dark:focus:bg-zinc-950 focus:ring-1 focus:ring-blue-500 rounded px-1.5 py-0.5 w-full flex-1 min-w-0"
+                                                value={group.name}
+                                                onChange={(e) => viewerManager?.renamePlanningGroup(group.id, e.target.value)}
+                                                placeholder="Edit group name..."
+                                            />
+                                            
+                                            <span className="text-[9px] font-mono text-zinc-400 shrink-0">({groupObjects.length})</span>
+                                        </div>
                                         
-                                        <input 
-                                            type="text" 
-                                            className="text-[11px] font-bold bg-transparent border-none text-zinc-800 dark:text-zinc-100 focus:bg-white dark:focus:bg-zinc-950 focus:ring-1 focus:ring-blue-500 rounded px-1.5 py-0.5 w-full flex-1 min-w-0"
-                                            value={group.name}
-                                            onChange={(e) => viewerManager?.renamePlanningGroup(group.id, e.target.value)}
-                                            placeholder="Edit group name..."
-                                        />
-                                        
-                                        <span className="text-[9px] font-mono text-zinc-400 shrink-0">({groupObjects.length})</span>
+                                        <div className="flex items-center gap-0.5 shrink-0">
+                                            <button 
+                                                onClick={() => viewerManager?.setPlanningGroupVisibility(group.id, group.visible === false)} 
+                                                className="p-1 text-zinc-400 hover:text-blue-500 dark:text-zinc-500 dark:hover:text-blue-400 transition"
+                                                title={group.visible === false ? "Show Group" : "Hide Group"}
+                                            >
+                                                {group.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
+                                            </button>
+                                            <button 
+                                                onClick={() => viewerManager?.duplicatePlanningGroup(group.id)} 
+                                                className="p-1 text-zinc-400 hover:text-indigo-500 dark:text-zinc-500 dark:hover:text-indigo-400 transition"
+                                                title="Duplicate Group"
+                                            >
+                                                <Copy size={13} />
+                                            </button>
+                                            {confirmDeleteGroupId === group.id ? (
+                                                <div className="flex items-center gap-1 shrink-0 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 px-1 py-0.5 rounded text-[9px]">
+                                                    <span className="text-red-600 dark:text-red-400 font-bold mr-0.5 scale-90">Delete?</span>
+                                                    <button 
+                                                        onClick={() => {
+                                                            viewerManager?.removePlanningGroup(group.id, true);
+                                                            setConfirmDeleteGroupId(null);
+                                                        }} 
+                                                        className="bg-red-600 text-white font-bold px-1 rounded hover:bg-red-700 transition"
+                                                    >
+                                                        Yes
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setConfirmDeleteGroupId(null)} 
+                                                        className="bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700 transition"
+                                                    >
+                                                        No
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => setConfirmDeleteGroupId(group.id)} 
+                                                    className="p-1 text-zinc-400 hover:text-red-500 transition"
+                                                    title="Delete Group"
+                                                >
+                                                    <Trash2 size={12} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     
-                                    <div className="flex items-center gap-0.5 shrink-0">
-                                        <button 
-                                            onClick={() => viewerManager?.setPlanningGroupVisibility(group.id, group.visible === false)} 
-                                            className="p-1 text-zinc-400 hover:text-blue-500 dark:text-zinc-500 dark:hover:text-blue-400 transition"
-                                            title={group.visible === false ? "Show Group" : "Hide Group"}
-                                        >
-                                            {group.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
-                                        </button>
-                                        <button 
-                                            onClick={() => viewerManager?.duplicatePlanningGroup(group.id)} 
-                                            className="p-1 text-zinc-400 hover:text-indigo-500 dark:text-zinc-500 dark:hover:text-indigo-400 transition"
-                                            title="Duplicate Group"
-                                        >
-                                            <Copy size={13} />
-                                        </button>
-                                        {confirmDeleteGroupId === group.id ? (
-                                            <div className="flex items-center gap-1 shrink-0 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 px-1 py-0.5 rounded text-[9px]">
-                                                <span className="text-red-600 dark:text-red-400 font-bold mr-0.5 scale-90">Delete?</span>
-                                                <button 
-                                                    onClick={() => {
-                                                        viewerManager?.removePlanningGroup(group.id, true);
-                                                        setConfirmDeleteGroupId(null);
-                                                    }} 
-                                                    className="bg-red-600 text-white font-bold px-1 rounded hover:bg-red-700 transition"
-                                                >
-                                                    Yes
-                                                </button>
-                                                <button 
-                                                    onClick={() => setConfirmDeleteGroupId(null)} 
-                                                    className="bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1 rounded hover:bg-zinc-300 dark:hover:bg-zinc-700 transition"
-                                                >
-                                                    No
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <button 
-                                                onClick={() => setConfirmDeleteGroupId(group.id)} 
-                                                className="p-1 text-zinc-400 hover:text-red-500 transition"
-                                                title="Delete Group"
-                                            >
-                                                <Trash2 size={12} />
-                                            </button>
-                                        )}
-                                    </div>
+                                    {!group.isCollapsed && (
+                                        <div className="p-2 flex flex-col gap-2 bg-zinc-50/20 dark:bg-zinc-950/20">
+                                            {groupObjects.length === 0 ? (
+                                                <div className="text-center text-[10px] text-zinc-400 p-2 italic bg-white/40 dark:bg-black/10 rounded border border-dashed border-zinc-100 dark:border-zinc-800">
+                                                    No objects in group. Drag or assign inside options drawer.
+                                                </div>
+                                            ) : (
+                                                groupObjects.map((obj) => (
+                                                    <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
-                                
-                                {!group.isCollapsed && (
-                                    <div className="p-2 flex flex-col gap-2 bg-zinc-50/20 dark:bg-zinc-950/20">
-                                        {groupObjects.length === 0 ? (
-                                            <div className="text-center text-[10px] text-zinc-400 p-2 italic bg-white/40 dark:bg-black/10 rounded border border-dashed border-zinc-100 dark:border-zinc-800">
-                                                No objects in group. Drag or assign inside options drawer.
-                                            </div>
-                                        ) : (
-                                            groupObjects.map((obj) => (
-                                                <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
-                                            ))
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                            );
+                        })}
 
-                    {/* General / Unassigned Objects */}
-                    {(() => {
-                        const unassignedObjects = planningObjects.filter(obj => !obj.groupId || !planningGroups.some(g => g.id === obj.groupId));
-                        if (unassignedObjects.length === 0) return null;
-                        
-                        // Only wrap under general collapsible header if there is at least one custom group
-                        if (planningGroups.length === 0) {
-                            return unassignedObjects.map((obj) => (
-                                <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
-                            ));
-                        }
-                        
-                        return (
-                            <div 
-                                className="border border-dashed border-zinc-300 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white/50 dark:bg-zinc-900/40"
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    const draggedId = e.dataTransfer.getData('text/plain');
-                                    if (draggedId && viewerManager) {
-                                        viewerManager.setPlanningObjectGroupId(draggedId, undefined);
-                                    }
-                                }}
-                            >
-                                <div className="flex items-center gap-2 px-3 py-2 bg-zinc-50/50 dark:bg-zinc-950/10 border-b border-dashed border-zinc-200 dark:border-zinc-800 shadow-xs">
-                                    <FolderOpen size={13} className="text-zinc-400 shrink-0" />
-                                    <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex-1">
-                                        General / Unassigned
+                        {/* General / Unassigned Objects */}
+                        {(() => {
+                            const unassignedObjects = planningObjects.filter(obj => !obj.groupId || !planningGroups.some(g => g.id === obj.groupId));
+                            if (unassignedObjects.length === 0) return null;
+                            
+                            // Only wrap under general collapsible header if there is at least one custom group
+                            if (planningGroups.length === 0) {
+                                return unassignedObjects.map((obj) => (
+                                    <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
+                                ));
+                            }
+                            
+                            return (
+                                <div 
+                                    className="border border-dashed border-zinc-300 dark:border-zinc-800 rounded mb-2 overflow-visible bg-white/50 dark:bg-zinc-900/40"
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        const draggedId = e.dataTransfer.getData('text/plain');
+                                        if (draggedId && viewerManager) {
+                                            viewerManager.setPlanningObjectGroupId(draggedId, undefined);
+                                        }
+                                    }}
+                                >
+                                    <div className="flex items-center gap-2 px-3 py-2 bg-zinc-50/50 dark:bg-zinc-950/10 border-b border-dashed border-zinc-200 dark:border-zinc-800 shadow-xs">
+                                        <FolderOpen size={13} className="text-zinc-400 shrink-0" />
+                                        <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider flex-1">
+                                            General / Unassigned
+                                        </div>
+                                        <span className="text-[9px] font-mono text-zinc-400 shrink-0">({unassignedObjects.length})</span>
                                     </div>
-                                    <span className="text-[9px] font-mono text-zinc-400 shrink-0">({unassignedObjects.length})</span>
+                                    <div className="p-2 flex flex-col gap-2">
+                                        {unassignedObjects.map((obj) => (
+                                            <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="p-2 flex flex-col gap-2">
-                                    {unassignedObjects.map((obj) => (
-                                        <PlanningObjectItem key={obj.id} obj={obj} viewerManager={viewerManager} />
-                                    ))}
-                                </div>
-                            </div>
-                        );
-                    })()}
-                </div>
-            )}
+                            );
+                        })()}
+                    </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       </div>
@@ -992,7 +1168,7 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                   )}
                   {obj.type === 'point' && obj.diameter !== undefined && (
                       <span className="text-[11px] font-mono leading-tight whitespace-nowrap tracking-tight text-purple-600 dark:text-purple-400 font-bold">
-                          D: {(obj.diameter ?? 0.2).toFixed(1)} mm
+                          D: {(obj.diameter ?? 0.6).toFixed(1)} mm
                           {localPos.x !== undefined && <span className="ml-2 text-[9px] text-zinc-400 dark:text-zinc-500 font-normal">Pos: {localPos.x.toFixed(1)}, {localPos.y?.toFixed(1)}, {localPos.z?.toFixed(1)}</span>}
                       </span>
                   )}

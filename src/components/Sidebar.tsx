@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { ChevronDown, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight, Pin, PinOff } from 'lucide-react';
 import { ModelStatusCard } from './ModelStatusCard';
 import { Tooltip } from './Tooltip';
+import { shouldIgnoreHover } from '../lib/utils';
 
 export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: () => void }) {
   const { 
@@ -21,7 +22,9 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
   } = useViewer();
 
   const [meshVisOpen, setMeshVisOpen] = useState(true);
+  const [isMeshVisPinned, setIsMeshVisPinned] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isAdvancedPinned, setIsAdvancedPinned] = useState(false);
   const [flyThroughSectionExpanded, setFlyThroughSectionExpanded] = useState<boolean>(false);
   const [selectedCurveId, setSelectedCurveId] = useState<string>('');
   const [splineMeshTarget, setSplineMeshTarget] = useState<string>('all');
@@ -30,6 +33,63 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
   const [splineClippingExpanded, setSplineClippingExpanded] = useState<boolean>(false);
   const [splineClippingCurveId, setSplineClippingCurveId] = useState<string>('');
   const [splineClipMeshTarget, setSplineClipMeshTarget] = useState<string>('all');
+
+  const meshVisRef = useRef<HTMLDivElement>(null);
+  const advancedRef = useRef<HTMLDivElement>(null);
+
+  const meshVisTimerRef = useRef<any>(null);
+  const advancedTimerRef = useRef<any>(null);
+
+  const handleMeshVisMouseEnter = () => {
+    if (shouldIgnoreHover()) return;
+    if (meshVisTimerRef.current) {
+      clearTimeout(meshVisTimerRef.current);
+      meshVisTimerRef.current = null;
+    }
+    if (!isMeshVisPinned) {
+      setMeshVisOpen(true);
+    }
+  };
+
+  const handleMeshVisMouseLeave = (e?: React.MouseEvent) => {
+    if (shouldIgnoreHover()) return;
+    if (isMeshVisPinned) return;
+    if (e && e.buttons !== 0) return;
+    if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+    meshVisTimerRef.current = setTimeout(() => {
+      if (meshVisRef.current?.contains(document.activeElement)) return;
+      setMeshVisOpen(false);
+    }, 350);
+  };
+
+  const handleAdvancedMouseEnter = () => {
+    if (shouldIgnoreHover()) return;
+    if (advancedTimerRef.current) {
+      clearTimeout(advancedTimerRef.current);
+      advancedTimerRef.current = null;
+    }
+    if (!isAdvancedPinned) {
+      setAdvancedOpen(true);
+    }
+  };
+
+  const handleAdvancedMouseLeave = (e?: React.MouseEvent) => {
+    if (shouldIgnoreHover()) return;
+    if (isAdvancedPinned) return;
+    if (e && e.buttons !== 0) return;
+    if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+    advancedTimerRef.current = setTimeout(() => {
+      if (advancedRef.current?.contains(document.activeElement)) return;
+      setAdvancedOpen(false);
+    }, 350);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+      if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+    };
+  }, []);
 
   const availableCurves = (planningObjects || []).filter(o => o.type === 'curve');
 
@@ -47,11 +107,12 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
   return (
     <aside 
       onMouseLeave={(e) => {
+        if (shouldIgnoreHover()) return;
         if (e.buttons === 0) {
-          setMeshVisOpen(false);
-          setAdvancedOpen(false);
-          setSplineClippingExpanded(false);
-          setFlyThroughSectionExpanded(false);
+          if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+          if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+          if (!isMeshVisPinned) setMeshVisOpen(false);
+          if (!isAdvancedPinned) setAdvancedOpen(false);
         }
       }}
       className={`transition-all duration-300 bg-zinc-50 dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 ${collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[280px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 flex'}`}
@@ -71,144 +132,207 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
 
         {/* Section: Mesh Visibility */}
         <div 
+          ref={meshVisRef}
           className="border-t border-b border-zinc-200 dark:border-zinc-800 transition-colors"
-          onMouseLeave={(e) => {
-            if (e.buttons === 0) {
-              setMeshVisOpen(false);
-            }
-          }}
+          onMouseEnter={handleMeshVisMouseEnter}
+          onMouseLeave={handleMeshVisMouseLeave}
         >
-          <div className="flex justify-between items-center cursor-pointer px-6 py-4 text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={() => setMeshVisOpen(!meshVisOpen)}>
+          <div 
+            className="flex justify-between items-center cursor-pointer px-4 py-3 text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 select-none transition-colors" 
+            onClick={() => {
+              if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+              setMeshVisOpen(!meshVisOpen);
+            }}
+          >
             <span>Mesh Visibility</span>
-            <ChevronDown size={14} className={`transition-transform duration-200 text-zinc-400 ${meshVisOpen ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsMeshVisPinned(!isMeshVisPinned)}
+                className={`p-1 rounded transition-colors ${
+                  isMeshVisPinned 
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
+                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
+                }`}
+                title={isMeshVisPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
+              >
+                {isMeshVisPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
+              </button>
+              <button
+                onClick={() => {
+                  if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+                  setMeshVisOpen(!meshVisOpen);
+                }}
+                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
+                title={meshVisOpen ? "Minimize section" : "Expand section"}
+              >
+                {meshVisOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            </div>
           </div>
           
-          {meshVisOpen && (
-            <div className="px-6 py-4">
-              <div className="border-l-2 border-zinc-900 dark:border-zinc-100 pl-3 mb-6">
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-widest font-semibold">Global Opacity</label>
-                  <div className="flex items-center gap-1">
-                    <Tooltip content="Invert Displayed Models" side="top">
-                      <button 
-                        className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                        onClick={invertMeshesVisibility}
-                        disabled={meshes.length === 0}
-                      >
-                        <ArrowLeftRight size={13} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip content={meshes.length > 0 && meshes.every(m => m.visible !== false) ? "Hide All Models" : "Show All Models"} side="top">
-                      <button 
-                        className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                        onClick={toggleAllMeshesVisibility}
-                        disabled={meshes.length === 0}
-                      >
-                        {meshes.length > 0 && meshes.every(m => m.visible !== false) ? <Eye size={13} /> : <EyeOff size={13} />}
-                      </button>
-                    </Tooltip>
+          <div 
+            className={`grid transition-all duration-300 ease-in-out ${
+              meshVisOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="px-6 py-4">
+                <div className="border-l-2 border-zinc-900 dark:border-zinc-100 pl-3 mb-6">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-widest font-semibold">Global Opacity</label>
+                    <div className="flex items-center gap-1">
+                      <Tooltip content="Invert Displayed Models" side="top">
+                        <button 
+                          className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                          onClick={invertMeshesVisibility}
+                          disabled={meshes.length === 0}
+                        >
+                          <ArrowLeftRight size={13} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={meshes.length > 0 && meshes.every(m => m.visible !== false) ? "Hide All Models" : "Show All Models"} side="top">
+                        <button 
+                          className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                          onClick={toggleAllMeshesVisibility}
+                          disabled={meshes.length === 0}
+                        >
+                          {meshes.length > 0 && meshes.every(m => m.visible !== false) ? <Eye size={13} /> : <EyeOff size={13} />}
+                        </button>
+                      </Tooltip>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <input 
+                      type="range" 
+                      min="0" max="1" step="0.05" 
+                      value={globalOpacity} 
+                      onChange={(e) => setGlobalOpacity(parseFloat(e.target.value))}
+                      className="flex-1 cursor-pointer" 
+                    />
+                    <span className="w-10 text-right text-zinc-800 dark:text-zinc-200 font-mono text-sm font-semibold">{Math.round(globalOpacity * 100)}%</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2.5">
-                  <input 
-                    type="range" 
-                    min="0" max="1" step="0.05" 
-                    value={globalOpacity} 
-                    onChange={(e) => setGlobalOpacity(parseFloat(e.target.value))}
-                    className="flex-1 cursor-pointer" 
-                  />
-                  <span className="w-10 text-right text-zinc-800 dark:text-zinc-200 font-mono text-sm font-semibold">{Math.round(globalOpacity * 100)}%</span>
-                </div>
-              </div>
-              
-              <div className="flex flex-col">
-                {meshes.length === 0 ? (
-                  <div className="text-[13px] text-zinc-500 dark:text-zinc-400 py-2">
-                    No sub-models found.
-                  </div>
-                ) : (
-                  meshes.map((mesh) => (
-                    <div 
-                      key={mesh.id}
-                      className={`border-b border-zinc-100 dark:border-zinc-800/50 py-3 text-[13px] cursor-pointer transition-all duration-200 ${highlightedMeshId === mesh.id ? 'text-blue-600 dark:text-blue-400 font-semibold bg-zinc-100/50 dark:bg-zinc-800/30' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/20'}`}
-                      onMouseEnter={() => {
-                        highlightMesh(mesh.id);
-                      }}
-                      onMouseLeave={() => {
-                        highlightMesh(null);
-                      }}
-                      onClick={(e) => {
-                        if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) return;
-                        highlightMesh(highlightedMeshId === mesh.id ? null : mesh.id);
-                      }}
-                    >
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]" title={mesh.name}>{mesh.name}</span>
-                        <div className="flex items-center gap-0.5">
-                          <Tooltip content="Add / Duplicate to Object List & Analytic Tools" side="top">
-                            <button 
-                              className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (viewerManager && typeof viewerManager.duplicateSubmeshToPlanningObjects === 'function') {
-                                  viewerManager.duplicateSubmeshToPlanningObjects(mesh.id);
-                                  setActiveModal('planning');
-                                }
-                              }}
-                            >
-                              <Copy size={13} />
-                            </button>
-                          </Tooltip>
-                          <Tooltip content="Toggle Visibility" side="top">
-                            <button 
-                              className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleMeshVisibility(mesh.id);
-                              }}
-                            >
-                              {mesh.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                            </button>
-                          </Tooltip>
+                
+                <div className="flex flex-col">
+                  {meshes.length === 0 ? (
+                    <div className="text-[13px] text-zinc-500 dark:text-zinc-400 py-2">
+                      No sub-models found.
+                    </div>
+                  ) : (
+                    meshes.map((mesh) => (
+                      <div 
+                        key={mesh.id}
+                        className={`border-b border-zinc-100 dark:border-zinc-800/50 py-3 text-[13px] cursor-pointer transition-all duration-200 ${highlightedMeshId === mesh.id ? 'text-blue-600 dark:text-blue-400 font-semibold bg-zinc-100/50 dark:bg-zinc-800/30' : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/20'}`}
+                        onMouseEnter={() => {
+                          highlightMesh(mesh.id);
+                        }}
+                        onMouseLeave={() => {
+                          highlightMesh(null);
+                        }}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) return;
+                          highlightMesh(highlightedMeshId === mesh.id ? null : mesh.id);
+                        }}
+                      >
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="whitespace-nowrap overflow-hidden text-ellipsis max-w-[150px]" title={mesh.name}>{mesh.name}</span>
+                          <div className="flex items-center gap-0.5">
+                            <Tooltip content="Add / Duplicate to Object List & Analytic Tools" side="top">
+                              <button 
+                                className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (viewerManager && typeof viewerManager.duplicateSubmeshToPlanningObjects === 'function') {
+                                    viewerManager.duplicateSubmeshToPlanningObjects(mesh.id);
+                                    setActiveModal('planning');
+                                  }
+                                }}
+                              >
+                                <Copy size={13} />
+                              </button>
+                            </Tooltip>
+                            <Tooltip content="Toggle Visibility" side="top">
+                              <button 
+                                className="bg-transparent border-none cursor-pointer text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center justify-center p-1 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleMeshVisibility(mesh.id);
+                                }}
+                              >
+                                {mesh.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                              </button>
+                            </Tooltip>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2.5 opacity-80" onClick={e => e.stopPropagation()}>
+                          <span title="Opacity" className="flex items-center">
+                            <Droplets size={12} className="text-zinc-400" />
+                          </span>
+                          <input 
+                            type="range" 
+                            min="0" max="1" step="0.05" 
+                            value={mesh.opacity} 
+                            onChange={(e) => setMeshOpacity(mesh.id, parseFloat(e.target.value))}
+                            className="flex-1 cursor-pointer" 
+                          />
+                          <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 w-8 text-right">{Math.round(mesh.opacity * 100)}%</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2.5 opacity-80" onClick={e => e.stopPropagation()}>
-                        <span title="Opacity" className="flex items-center">
-                          <Droplets size={12} className="text-zinc-400" />
-                        </span>
-                        <input 
-                          type="range" 
-                          min="0" max="1" step="0.05" 
-                          value={mesh.opacity} 
-                          onChange={(e) => setMeshOpacity(mesh.id, parseFloat(e.target.value))}
-                          className="flex-1 cursor-pointer" 
-                        />
-                        <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 w-8 text-right">{Math.round(mesh.opacity * 100)}%</span>
-                      </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-          )}
+          </div>
         </div>
 
         {/* Section: Advanced Visual Tools */}
         <div 
+          ref={advancedRef}
           className="border-b border-zinc-200 dark:border-zinc-800 transition-colors"
-          onMouseLeave={(e) => {
-            if (e.buttons === 0) {
-              setAdvancedOpen(false);
-            }
-          }}
+          onMouseEnter={handleAdvancedMouseEnter}
+          onMouseLeave={handleAdvancedMouseLeave}
         >
-          <div className="flex justify-between items-center cursor-pointer px-6 py-4 text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" onClick={() => setAdvancedOpen(!advancedOpen)}>
+          <div 
+            className="flex justify-between items-center cursor-pointer px-4 py-3 text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/70 dark:hover:bg-zinc-800/60 select-none transition-colors" 
+            onClick={() => {
+              if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+              setAdvancedOpen(!advancedOpen);
+            }}
+          >
             <span>Advanced Visual Tools</span>
-            <ChevronDown size={14} className={`transition-transform duration-200 text-zinc-400 ${advancedOpen ? 'rotate-180' : ''}`} />
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={() => setIsAdvancedPinned(!isAdvancedPinned)}
+                className={`p-1 rounded transition-colors ${
+                  isAdvancedPinned 
+                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
+                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
+                }`}
+                title={isAdvancedPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
+              >
+                {isAdvancedPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
+              </button>
+              <button
+                onClick={() => {
+                  if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+                  setAdvancedOpen(!advancedOpen);
+                }}
+                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
+                title={advancedOpen ? "Minimize section" : "Expand section"}
+              >
+                {advancedOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            </div>
           </div>
 
-          {advancedOpen && (
-            <div className="px-6 py-4 flex flex-col gap-6">
+          <div 
+            className={`grid transition-all duration-300 ease-in-out ${
+              advancedOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="px-6 py-4 flex flex-col gap-6">
             <div className="border-l-2 border-zinc-900 dark:border-zinc-100 pl-3">
               <div className="flex justify-between items-center mb-3">
                 <label className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-widest font-semibold cursor-pointer" onClick={() => setIsClipping(!isClipping)}>Clipping</label>
@@ -259,18 +383,13 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
               })()}
             </div>
 
-            {/* 3D Spline Clipping Feature */}
+            {/* 3D Spline Clipping Feature (Manual toggle only) */}
             <div 
               className={`border-l-2 ${splineClippingState.active ? 'border-indigo-500 bg-indigo-950/20 rounded-r p-2.5 -ml-1 pl-3' : 'border-indigo-500 pl-3'} transition-all`}
-              onMouseLeave={(e) => {
-                if (e.buttons === 0) {
-                  setSplineClippingExpanded(false);
-                }
-              }}
             >
               <div className="flex justify-between items-center mb-2">
                 <div 
-                  className="flex items-center gap-2 cursor-pointer flex-1"
+                  className="flex items-center gap-2 cursor-pointer flex-1 select-none"
                   onClick={() => setSplineClippingExpanded(!splineClippingExpanded)}
                 >
                   <div className="flex flex-col">
@@ -451,18 +570,13 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
               </div>
             </div>
 
-            {/* Curved Anatomical Endoscopy Mode (Virtual Endoscopy / Vessel Probe) */}
+            {/* Curved Anatomical Endoscopy Mode (Manual toggle only) */}
             <div 
               className={`border-l-2 ${flyThroughState.active ? 'border-cyan-500 bg-cyan-950/20 rounded-r p-2.5 -ml-1 pl-3' : 'border-cyan-500 pl-3'} transition-all`}
-              onMouseLeave={(e) => {
-                if (e.buttons === 0) {
-                  setFlyThroughSectionExpanded(false);
-                }
-              }}
             >
               <div className="flex justify-between items-center mb-2">
                 <div 
-                  className="flex items-center gap-2 cursor-pointer flex-1"
+                  className="flex items-center gap-2 cursor-pointer flex-1 select-none"
                   onClick={() => setFlyThroughSectionExpanded(!flyThroughSectionExpanded)}
                 >
                   <div className="flex flex-col">
@@ -691,7 +805,8 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
               )}
             </div>
           </div>
-        )}
+            </div>
+          </div>
         </div>
 
         {/* Model Status Section (Non-retractable / Always Visible) */}

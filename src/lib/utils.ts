@@ -131,3 +131,40 @@ export function isSafeModelUrl(url: string | null | undefined): boolean {
     return false;
   }
 }
+
+// Global tracker for recent touch events
+let lastTouchTimestamp = 0;
+if (typeof window !== 'undefined') {
+  window.addEventListener('touchstart', () => {
+    lastTouchTimestamp = Date.now();
+  }, { passive: true, capture: true });
+}
+
+/**
+ * Detects if the current device/environment primarily uses touch interaction or coarse pointer
+ */
+export function isTouchScreen(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    'ontouchstart' in window ||
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
+    (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+    (window.matchMedia && !window.matchMedia('(hover: hover)').matches)
+  );
+}
+
+/**
+ * Determines whether hover-triggered auto-expand / auto-collapse should be ignored.
+ * Returns true for touch screen interactions or devices without fine hover capabilities,
+ * requiring explicit user tapping.
+ */
+export function shouldIgnoreHover(): boolean {
+  if (typeof window === 'undefined') return false;
+  // If a touch interaction occurred recently (within 1.5s), ignore synthetic mouse hover events
+  if (Date.now() - lastTouchTimestamp < 1500) return true;
+  // If the device does not support fine hover capability (touch devices, phones, tablets)
+  if (window.matchMedia && !window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    return true;
+  }
+  return false;
+}
