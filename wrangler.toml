@@ -1,6 +1,0 @@
-name = "med3dviewer"
-compatibility_date = "2026-09-29"
-pages_build_output_dir = "./dist"
-
-[env.preview]
-name = "med3dviewer-preview"
