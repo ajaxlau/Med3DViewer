@@ -1,0 +1,26 @@
+{
+  // ...
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "prod-uploads"
+    }
+  ],
+  // ...
+  "previews": {
+    // ...
+    "vars": {
+      "ENVIRONMENT": "preview"
+    },
+    "r2_buckets": [
+      {
+        "binding": "UPLOADS",
+        "bucket_name": "r2-staging"
+      }
+    ]
+    // ...
+  }
+}
