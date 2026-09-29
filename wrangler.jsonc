@@ -1,15 +1,4 @@
 {
-  // ...
-  "vars": {
-    "ENVIRONMENT": "production"
-  },
-  "r2_buckets": [
-    {
-      "binding": "UPLOADS",
-      "bucket_name": "prod-uploads"
-    }
-  ],
-  // ...
   "previews": {
     // ...
     "vars": {
