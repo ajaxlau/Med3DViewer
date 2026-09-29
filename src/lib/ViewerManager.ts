@@ -5,6 +5,16 @@ import {
 } from "./gpuDetection";
 import { disposeHierarchy, isSafeModelUrl } from "./utils";
 import JSZip from "jszip";
+import {
+  asLoadException,
+  createIdleLoadState,
+  getDeviceLoadProfile,
+  getFileExtension,
+  ModelLoadException,
+  ModelLoadState,
+  validateLocalFiles,
+  validateRemoteModelUrl,
+} from "./modelLoading";
 
 export interface FlyThroughState {
   active: boolean;
@@ -148,6 +158,10 @@ export class ViewerManager {
         zoomLevel: 1,
       }),
       (this.splineClipPlane = null),
+      (this.modelLoadState = createIdleLoadState(!1)),
+      (this.activeLoadController = null),
+      (this.activeLoadRequestId = null),
+      (this.forceSafeMode = !1),
       (this.preSplineClipCamera = null),
       (this.isDisposed = !1),
       (this.resizeObserver = null),
@@ -409,6 +423,7 @@ export class ViewerManager {
       (!r || r.tier === "unsupported" || r.architecture === "Legacy WebGL"
         ? (c = 1)
         : r.tier === "webgl2" && (c = 1.5),
+        this.forceSafeMode && (c = Math.min(c, 1)),
         i.setPixelRatio(Math.min(window.devicePixelRatio || 1, c)));
     }
     const l = i.domElement;
@@ -795,8 +810,9 @@ export class ViewerManager {
     const d = new window.OV.Camera(c, l, f, (s == null ? void 0 : s.fov) || 45);
     this.tweenCamera(d, 500);
   }
-  resetWorkspace() {
+  resetWorkspace(preserveActiveLoad = !1) {
     var i, r;
+    preserveActiveLoad || this.cancelModelLoad(!0);
     if (
       (this.flyThroughState.active && this.stopFlyThrough(),
       this.treeParseInterval &&
@@ -926,7 +942,8 @@ Please open a file.`,
   }
   dispose() {
     var i, r, l;
-    ((this.isDisposed = !0),
+    (this.cancelModelLoad(!0),
+      (this.isDisposed = !0),
       this.flyThroughState.active && this.stopFlyThrough(),
       this.treeParseInterval &&
         (clearInterval(this.treeParseInterval),
@@ -1391,55 +1408,175 @@ Please open a file.`,
         console.warn("Failed to load planning objects from localStorage", r);
       }
   }
-  loadFiles(i) {
+  emitModelLoadState(updates: Partial<ModelLoadState>) {
+    this.modelLoadState = { ...this.modelLoadState, ...updates };
+    this.config.onModelLoadStateChange &&
+      this.config.onModelLoadStateChange({ ...this.modelLoadState });
+  }
+  setSafeMode(enabled) {
+    this.forceSafeMode = Boolean(enabled);
+    this.emitModelLoadState({ safeMode: this.forceSafeMode });
+    this.applyGpuTierSettings();
+  }
+  cancelModelLoad(silent = false) {
+    if (this.activeLoadController) this.activeLoadController.abort();
+    this.activeLoadController = null;
+    this.activeLoadRequestId = null;
+    if (this.treeParseInterval) {
+      clearInterval(this.treeParseInterval);
+      this.treeParseInterval = null;
+    }
+    if (!silent && ['validating', 'downloading', 'parsing'].includes(this.modelLoadState.phase)) {
+      this.emitModelLoadState({
+        phase: 'cancelled', cancellable: false, error: null,
+        warning: 'Loading cancelled. You can retry the same model.'
+      });
+      this.config.onStatusChange('Model loading cancelled.', !0, null, null);
+      this.config.onProgressChange && this.config.onProgressChange(0);
+    }
+  }
+  failModelLoad(requestId, error) {
+    if (requestId !== this.activeLoadRequestId) return;
+    const failure = asLoadException(error);
+    this.activeLoadController = null;
+    this.activeLoadRequestId = null;
+    this.loadedUrl = null;
+    this.emitModelLoadState({
+      phase: failure.code === 'CANCELLED' ? 'cancelled' : 'failed',
+      cancellable: false,
+      error: failure.code === 'CANCELLED' ? null : {
+        code: failure.code, message: failure.message, workaround: failure.workaround
+      }
+    });
+    this.config.onProgressChange && this.config.onProgressChange(0);
+    this.config.onStatusChange(failure.message, !0, null, null);
+  }
+  async loadFiles(i) {
     if (!i || i.length === 0) return;
-    (this.resetWorkspace(), (this.loadedUrl = null));
-    const r = Array.from(i) as any[],
-      l = r[0].name;
-    (this.config.onStatusChange("Loading model data...", !0, l, null),
-      this.config.onProgressChange && this.config.onProgressChange(5));
+    this.cancelModelLoad(!0);
+    const requestId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const files = Array.from(i) as File[];
+    const profile = getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode);
+    this.activeLoadRequestId = requestId;
+    this.emitModelLoadState({
+      requestId, phase: 'validating', source: 'local', filename: files[0].name,
+      bytesReceived: 0, bytesTotal: null, progress: 2, cancellable: true,
+      safeMode: this.forceSafeMode, warning: null, error: null
+    });
+    this.config.onStatusChange('Validating local model...', !0, files[0].name, null);
     try {
-      this.viewer.LoadModelFromFileList(r);
-    } catch (u) {
-      console.error(u);
-    }
-    this.waitForModelAndBuildTree(l);
+      const result = await validateLocalFiles(files, profile);
+      if (requestId !== this.activeLoadRequestId) return;
+      this.resetWorkspace(!0);
+      this.activeLoadRequestId = requestId;
+      this.loadedUrl = null;
+      this.emitModelLoadState({
+        requestId, phase: 'parsing', source: 'local', filename: result.primaryName,
+        bytesReceived: result.totalBytes, bytesTotal: result.totalBytes,
+        progress: 10, cancellable: true, warning: result.warning, error: null
+      });
+      this.config.onStatusChange('Parsing local model...', !0, result.primaryName, null);
+      this.config.onProgressChange && this.config.onProgressChange(10);
+      this.viewer.LoadModelFromFileList(files);
+      this.waitForModelAndBuildTree(result.primaryName, undefined, requestId);
+    } catch (error) { this.failModelLoad(requestId, error); }
   }
-  loadUrl(i, r) {
-    var u;
-    if (!i || !isSafeModelUrl(i)) {
-      console.warn("[Security] Blocked loadUrl with unsafe or invalid URL:", i);
-      return;
-    }
-    if (this.loadedUrl === i) {
-      console.log(
-        "Model URL is already loaded or in progress of being loaded:",
-        i,
-      );
-      return;
-    }
-    (this.resetWorkspace(), (this.loadedUrl = i));
-    const l =
-      ((u = i.split("/").pop()) == null ? void 0 : u.split("?")[0]) ||
-      "Remote Model";
-    (this.config.onStatusChange("Loading model from URL...", !0, l, i),
-      this.config.onProgressChange && this.config.onProgressChange(5));
+  async loadUrl(i, camera) {
+    this.cancelModelLoad(!0);
+    const requestId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const controller = new AbortController();
+    this.activeLoadRequestId = requestId;
+    this.activeLoadController = controller;
+    const profile = getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode);
+    let downloadTimeout: ReturnType<typeof setTimeout> | null = null;
+    this.emitModelLoadState({
+      requestId, phase: 'validating', source: 'remote', filename: null,
+      bytesReceived: 0, bytesTotal: null, progress: 2, cancellable: true,
+      safeMode: this.forceSafeMode, warning: null, error: null
+    });
     try {
-      this.viewer.LoadModelFromUrlList([i]);
-    } catch (s) {
-      console.error(s);
+      const url = validateRemoteModelUrl(i);
+      if (!isSafeModelUrl(url.href)) throw new ModelLoadException('URL_INVALID', 'The model URL is not allowed.');
+      const filename = decodeURIComponent(url.pathname.split('/').pop() || '') || 'Remote Model';
+      if (!getFileExtension(filename)) throw new ModelLoadException('FORMAT_UNSUPPORTED', 'The URL must identify a supported model file.', 'Use a direct file URL ending in STL, GLB, OBJ, PLY, or another supported extension.');
+      this.emitModelLoadState({ filename, phase: 'downloading' });
+      this.config.onStatusChange('Downloading model...', !0, filename, null);
+      downloadTimeout = setTimeout(() => controller.abort('timeout'), profile.maxWaitMs);
+      const refreshTimeout = () => {
+        if (downloadTimeout) clearTimeout(downloadTimeout);
+        downloadTimeout = setTimeout(() => controller.abort('timeout'), profile.maxWaitMs);
+      };
+      const response = await fetch(url.href, { signal: controller.signal, credentials: 'omit', redirect: 'follow' });
+      if (!response.ok) throw new ModelLoadException('HTTP_ERROR', `The model server returned HTTP ${response.status}.`, 'Check that the direct download link is public and has not expired.');
+      validateRemoteModelUrl(response.url || url.href);
+      const declaredLength = Number(response.headers.get('content-length')) || null;
+      if (declaredLength && declaredLength > profile.hardLimitBytes) throw new ModelLoadException('SIZE_LIMIT', `This ${(declaredLength / 1048576).toFixed(1)} MB model exceeds the ${profile.name} device limit.`, 'Download and simplify the model, or use a higher-memory device.');
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      if (response.body) {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          refreshTimeout();
+          received += value.byteLength;
+          if (received > profile.hardLimitBytes) {
+            await reader.cancel();
+            throw new ModelLoadException('SIZE_LIMIT', `The download exceeded the ${profile.name} device limit.`, 'Download and simplify the model, or use a higher-memory device.');
+          }
+          chunks.push(value);
+          const progress = declaredLength ? Math.min(70, 5 + (received / declaredLength) * 65) : Math.min(65, 5 + Math.log2(1 + received / 1048576) * 8);
+          this.emitModelLoadState({ bytesReceived: received, bytesTotal: declaredLength, progress });
+          this.config.onProgressChange && this.config.onProgressChange(progress);
+        }
+      } else {
+        const buffer = await response.arrayBuffer();
+        received = buffer.byteLength;
+        if (received > profile.hardLimitBytes) throw new ModelLoadException('SIZE_LIMIT', `The download exceeded the ${profile.name} device limit.`);
+        chunks.push(new Uint8Array(buffer));
+      }
+      if (downloadTimeout) clearTimeout(downloadTimeout);
+      downloadTimeout = null;
+      if (requestId !== this.activeLoadRequestId) return;
+      const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
+      const file = new File([blob], filename, { type: blob.type });
+      const validation = await validateLocalFiles([file], profile);
+      if (['gltf', 'obj'].includes(getFileExtension(filename))) {
+        this.emitModelLoadState({
+          warning: 'Remote multi-file models may omit referenced buffers, materials, or textures. Prefer a self-contained GLB or ZIP file.'
+        });
+      } else if (validation.warning) this.emitModelLoadState({ warning: validation.warning });
+      this.resetWorkspace(!0);
+      this.activeLoadRequestId = requestId;
+      this.activeLoadController = controller;
+      this.loadedUrl = url.href;
+      this.emitModelLoadState({ phase: 'parsing', progress: 75, bytesReceived: received, bytesTotal: declaredLength || received });
+      this.config.onStatusChange('Parsing downloaded model...', !0, filename, url.href);
+      this.config.onProgressChange && this.config.onProgressChange(75);
+      this.viewer.LoadModelFromFileList([file]);
+      this.waitForModelAndBuildTree(filename, camera, requestId);
+    } catch (error) {
+      if (downloadTimeout) clearTimeout(downloadTimeout);
+      if (controller.signal.aborted && controller.signal.reason === 'timeout') {
+        this.failModelLoad(requestId, new ModelLoadException('NETWORK_TIMEOUT', 'The model download timed out.', 'Try again on a stable connection, or download the file and open it locally.'));
+      } else this.failModelLoad(requestId, error);
     }
-    this.waitForModelAndBuildTree(l, r);
   }
-  waitForModelAndBuildTree(i: any, r?: any) {
+  waitForModelAndBuildTree(i: any, r?: any, requestId?: string) {
     this.treeParseInterval && clearInterval(this.treeParseInterval);
     let l = 0,
       u = -1,
       s = 0,
-      c = 5;
+      c = Math.max(10, this.modelLoadState.progress || 10);
+    const profile = getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode);
     (this.config.onProgressChange && this.config.onProgressChange(c),
       (this.treeParseInterval = setInterval(() => {
         var f, d;
+        if (requestId && requestId !== this.activeLoadRequestId) {
+          clearInterval(this.treeParseInterval);
+          this.treeParseInterval = null;
+          return;
+        }
         (l++,
           c < 95 &&
             ((c += Math.max(1, (95 - c) * 0.1)),
@@ -1466,6 +1603,9 @@ Please open a file.`,
                 (clearInterval(this.treeParseInterval),
                 this.config.onProgressChange &&
                   this.config.onProgressChange(100),
+                this.emitModelLoadState({ phase: 'ready', progress: 100, cancellable: !1, error: null }),
+                (this.activeLoadController = null),
+                (this.activeLoadRequestId = null),
                 this.buildModelTree(),
                 this.setupExplosion(),
                 this.config.onStatusChange(
@@ -1515,22 +1655,16 @@ Please open a file.`,
           } else
             m > 0
               ? ((u = m), (s = 0))
-              : l >= 120 &&
+              : l * profile.pollIntervalMs >= profile.maxWaitMs &&
                 (clearInterval(this.treeParseInterval),
-                this.config.onProgressChange &&
-                  this.config.onProgressChange(100),
-                this.config.onStatusChange(
-                  `Loading finished.
-**${i}**`,
-                  !1,
-                ),
-                this.config.onMeshesChange([]));
+                this.failModelLoad(requestId || this.activeLoadRequestId,
+                  new ModelLoadException('PARSE_FAILED', 'No renderable mesh was found before loading timed out.', 'Try binary STL or GLB, include all companion files, or simplify the model.')));
         } catch {
           (clearInterval(this.treeParseInterval),
-            this.config.onProgressChange && this.config.onProgressChange(100),
-            this.config.onStatusChange("Error parsing model.", !1));
+            this.failModelLoad(requestId || this.activeLoadRequestId,
+              new ModelLoadException('PARSE_FAILED', 'The model could not be parsed.', 'Re-export it as binary STL or GLB and try again.')));
         }
-      }, 500)));
+      }, profile.pollIntervalMs)));
   }
   isCustomOverlay(i) {
     let r = i;
