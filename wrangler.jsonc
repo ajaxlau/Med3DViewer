@@ -1,15 +1,6 @@
 {
-  "previews": {
-    // ...
-    "vars": {
-      "ENVIRONMENT": "preview"
-    },
-    "r2_buckets": [
-      {
-        "binding": "UPLOADS",
-        "bucket_name": "r2-staging"
-      }
-    ]
-    // ...
-  }
+  "name": "beta",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "previews": {}
 }
