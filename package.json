@@ -1,13 +1,18 @@
 {
-  "name": "react-example",
+  "name": "med3dviewer",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "NODE_OPTIONS=\"--max-old-space-size=4096\" vite --port=3000 --host=0.0.0.0",
     "build": "NODE_OPTIONS=\"--max-old-space-size=4096\" vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 0.0.0.0",
+    "preview:cloudflare": "npm run build && npx --yes wrangler@4.40.2 pages dev dist",
+    "deploy:preview": "npm run build && npx --yes wrangler@4.40.2 pages deploy dist --project-name med3dviewer --branch preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
@@ -38,6 +43,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "wrangler": "^4.144.0"
+    "wrangler: "^4.144.0"
   }
 }

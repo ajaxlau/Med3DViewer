@@ -115,6 +115,19 @@ This software is developed as an interactive visualization and research planning
 
 ---
 
+## ☁️ Cloudflare Pages Preview
+
+The repository includes a `wrangler.toml` configuration for the Vite `dist` output and a dedicated `preview` environment.
+
+```bash
+npm ci
+npm run deploy:preview
+```
+
+For local validation using Cloudflare's Pages runtime, run `npm run preview:cloudflare`. A direct preview deployment requires an authenticated Wrangler session, or `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in CI. Do not commit either credential to the repository.
+
+---
+
 ## 📄 License
 
 This project is licensed under the open-source **MIT License** with an Educational & Research Use Notice — see the [LICENSE](LICENSE) file for details.
@@ -122,4 +135,3 @@ This project is licensed under the open-source **MIT License** with an Education
 ---
 
 *Developed for NTEC 3D Printing Office — Advancing Personalized Medicine through 3D Innovation.*
-
