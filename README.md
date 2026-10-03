@@ -117,14 +117,20 @@ This software is developed as an interactive visualization and research planning
 
 ## ☁️ Cloudflare Pages Preview
 
-The repository includes a `wrangler.toml` configuration for the Vite `dist` output and a dedicated `preview` environment.
+This static Vite application uses Cloudflare Pages' native Git integration; Wrangler is intentionally not installed or required during the Pages dependency-install step. Configure the Pages project with:
+
+| Setting | Value |
+| :--- | :--- |
+| Build command | `npm run build:cloudflare` |
+| Build output directory | `dist` |
+| Node.js version | `20` or newer |
+
+Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
 
 ```bash
 npm ci
-npm run deploy:preview
+npm run build:cloudflare
 ```
-
-For local validation using Cloudflare's Pages runtime, run `npm run preview:cloudflare`. A direct preview deployment requires an authenticated Wrangler session, or `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in CI. Do not commit either credential to the repository.
 
 ---
 
