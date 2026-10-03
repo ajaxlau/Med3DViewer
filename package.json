@@ -13,6 +13,7 @@
     "build:cloudflare": "npm run build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
+    "check:manifests": "node scripts/validate-manifests.mjs",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },

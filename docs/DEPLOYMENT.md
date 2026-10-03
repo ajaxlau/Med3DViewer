@@ -26,8 +26,10 @@ The deployment failure had several independent configuration conflicts:
    variables must never contain secrets.
 
 The repository now has one Pages configuration, a pinned Node major, a clean
-lockfile, and a GitHub build check. Cloudflare's Git integration owns deployment;
-GitHub Actions only validates the exact install/test/build path.
+lockfile, and a GitHub build check. A dependency-free manifest preflight reports
+invalid JSON or root lockfile drift before dependency installation. Cloudflare's
+Git integration owns deployment; GitHub Actions only validates the exact
+install/test/build path.
 
 ## One-time GitHub repository setup
 
@@ -69,9 +71,10 @@ GitHub Actions only validates the exact install/test/build path.
    | Build output directory | `dist` |
 
 4. Under **Settings > Environment variables**, set `NODE_VERSION` to `20` for
-   both Production and Preview. `.node-version` provides the same pin in source.
-   No application secrets are required. Never place a private key in a `VITE_*`
-   variable because Vite makes it public in the generated JavaScript.
+   both Production and Preview. `.node-version` and `.nvmrc` provide the same pin
+   in source for build systems that recognize either convention. No application
+   secrets are required. Never place a private key in a `VITE_*` variable because
+   Vite makes it public in the generated JavaScript.
 5. Under **Settings > Builds > Branch control**:
    - enable automatic production deployments for `main`;
    - select **All non-production branches** for previews, or select custom
@@ -105,6 +108,7 @@ Use the same clean-install sequence as CI and Cloudflare:
 
 ```bash
 rm -rf node_modules dist
+node scripts/validate-manifests.mjs
 npm ci
 npm run lint
 npm test
@@ -118,8 +122,10 @@ nonzero command exit is a deployment blocker.
 
 ## Troubleshooting and rollback
 
-- **`EJSONPARSE`**: validate `package.json` with `npm pkg get name` and inspect
-  the exact line reported by npm.
+- **`EJSONPARSE`**: run `node scripts/validate-manifests.mjs` and inspect the
+  exact line reported. If Cloudflare still shows the old malformed line 45,
+  verify that its deployment commit includes this fix and that the Pages project
+  is connected to the intended repository and branch.
 - **`npm ci` says the lock is out of sync**: use the pinned Node major, run
   `npm install` intentionally, review both manifest and lockfile, then commit
   them together. Do not have automation push an unreviewed lockfile.
