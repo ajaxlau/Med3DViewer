@@ -115,6 +115,25 @@ This software is developed as an interactive visualization and research planning
 
 ---
 
+## ☁️ Cloudflare Pages Preview
+
+This static Vite application uses Cloudflare Pages' native Git integration; Wrangler is intentionally not installed or required during the Pages dependency-install step. Configure the Pages project with:
+
+| Setting | Value |
+| :--- | :--- |
+| Build command | `npm run build:cloudflare` |
+| Build output directory | `dist` |
+| Node.js version | `20` or newer |
+
+Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
+
+```bash
+npm ci
+npm run build:cloudflare
+```
+
+---
+
 ## 📄 License
 
 This project is licensed under the open-source **MIT License** with an Educational & Research Use Notice — see the [LICENSE](LICENSE) file for details.
@@ -122,4 +141,3 @@ This project is licensed under the open-source **MIT License** with an Education
 ---
 
 *Developed for NTEC 3D Printing Office — Advancing Personalized Medicine through 3D Innovation.*
-
