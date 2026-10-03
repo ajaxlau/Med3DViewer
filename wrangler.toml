@@ -1,0 +1,6 @@
+name = "med3dviewer"
+compatibility_date = "2026-10-02"
+pages_build_output_dir = "./dist"
+
+[env.preview]
+compatibility_date = "2026-10-02"
