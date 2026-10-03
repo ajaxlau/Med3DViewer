@@ -123,7 +123,10 @@ This static Vite application uses Cloudflare Pages' native Git integration; Wran
 | :--- | :--- |
 | Build command | `npm run build:cloudflare` |
 | Build output directory | `dist` |
-| Node.js version | `20` or newer |
+| Root directory | `/` (repository root) |
+| Production branch | `main` |
+| Preview branches | All non-production branches (including `beta`) |
+| Node.js version | `20` (also pinned by `.node-version`) |
 
 Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
 
@@ -131,6 +134,10 @@ Cloudflare automatically creates preview deployments for non-production branches
 npm ci
 npm run build:cloudflare
 ```
+
+See [the deployment runbook](docs/DEPLOYMENT.md) for the full GitHub and
+Cloudflare setup, branch protection recommendations, failure diagnostics, and
+rollback procedure.
 
 ---
 
