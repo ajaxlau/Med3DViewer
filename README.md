@@ -123,14 +123,28 @@ This static Vite application uses Cloudflare Pages' native Git integration; Wran
 | :--- | :--- |
 | Build command | `npm run build:cloudflare` |
 | Build output directory | `dist` |
-| Node.js version | `20` or newer |
+| Root directory | `/` (repository root) |
+| Production branch | `main` |
+| Preview branches | All non-production branches (including `beta`) |
+| Node.js version | `20` (also pinned by `.node-version`) |
+| Deploy/preview command | None — Pages publishes `dist` automatically |
 
 Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
+
+> **Wrong product warning:** if a build log says `Executing user deploy command:
+> npx wrangler preview`, the repository is connected to **Workers Builds**, not
+> the Pages Git integration described here. Do not fix that by adding an API
+> token. Reconnect the repository as a Pages project and leave deploy/preview
+> commands unset.
 
 ```bash
 npm ci
 npm run build:cloudflare
 ```
+
+See [the deployment runbook](docs/DEPLOYMENT.md) for the full GitHub and
+Cloudflare setup, branch protection recommendations, failure diagnostics, and
+rollback procedure.
 
 ---
 
