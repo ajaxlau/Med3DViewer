@@ -115,22 +115,43 @@ This software is developed as an interactive visualization and research planning
 
 ---
 
-## ☁️ Cloudflare Pages Preview
+## ☁️ Cloudflare Workers Static Assets Preview
 
-This static Vite application uses Cloudflare Pages' native Git integration; Wrangler is intentionally not installed or required during the Pages dependency-install step. Configure the Pages project with:
+The current Cloudflare dashboard imports this repository through **Workers
+Builds**. Workers Builds does not show a separate “Build output directory” field;
+the output is declared in `wrangler.jsonc` as `assets.directory = "./dist"`.
+Configure the Worker with:
 
 | Setting | Value |
 | :--- | :--- |
 | Build command | `npm run build:cloudflare` |
-| Build output directory | `dist` |
-| Node.js version | `20` or newer |
+| Static asset directory | `./dist` (checked into `wrangler.jsonc`) |
+| Root directory | `/` (repository root) |
+| Production branch | `main` |
+| Preview branches | All non-production branches (including `beta`) |
+| Node.js version | `20` (also pinned by `.node-version`) |
+| Deploy command | `npm run deploy:cloudflare` |
+| Preview command | `npm run preview:cloudflare` |
+| API token | Select **Create new token** in Workers Builds |
 
-Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
+Cloudflare automatically creates Worker previews for non-production branches.
+The checked-in `package.json` and `package-lock.json` must remain synchronized so
+Cloudflare's clean install can complete. The Worker build requires no dashboard
+output-directory field: Wrangler uploads `dist` according to the checked-in
+configuration.
+
+The deploy script also passes `--assets ./dist` explicitly. This prevents the
+“Missing entry-point to Worker script or to assets directory” failure even when
+Wrangler does not auto-discover the configuration file.
 
 ```bash
 npm ci
 npm run build:cloudflare
 ```
+
+See [the deployment runbook](docs/DEPLOYMENT.md) for the full GitHub and
+Cloudflare setup, branch protection recommendations, failure diagnostics, and
+rollback procedure.
 
 ---
 
