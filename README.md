@@ -123,7 +123,7 @@ This static Vite application uses Cloudflare Pages' native Git integration; Wran
 | :--- | :--- |
 | Build command | `npm run build:cloudflare` |
 | Build output directory | `dist` |
-| Root directory | `/` (repository root) |
+| Root directory | Leave blank (repository root) |
 | Production branch | `main` |
 | Preview branches | All non-production branches (including `beta`) |
 | Node.js version | `20` (also pinned by `.node-version`) |
