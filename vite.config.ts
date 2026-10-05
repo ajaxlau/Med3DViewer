@@ -13,7 +13,7 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',
-        includeAssets: ['favicon.ico', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'masked-icon.svg', '3DPO_Small_Logo.png'],
+        includeAssets: ['favicon.ico', 'icon-192.png', 'icon-512.png', '3DPO_Small_Logo.png'],
         manifest: {
           name: 'NTEC3DPO - Med3DViewer',
           short_name: 'Med3DViewer',

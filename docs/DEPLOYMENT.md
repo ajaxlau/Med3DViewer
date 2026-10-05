@@ -4,6 +4,26 @@ This repository is a client-only Vite application. Cloudflare Pages should build
 and publish `dist`; there is no Worker entry point, server process, runtime
 secret, or database migration.
 
+This runbook follows Cloudflare's official documentation for [Pages build
+configuration](https://developers.cloudflare.com/pages/configuration/build-configuration/),
+[build images and runtime pins](https://developers.cloudflare.com/pages/configuration/build-image/),
+and [Git integration](https://developers.cloudflare.com/pages/configuration/git-integration/),
+plus GitHub's official guidance for [repository
+rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository).
+
+## Current beta audit
+
+| Check | Result | Deployment impact |
+| --- | --- | --- |
+| Git conflict markers | None found | No unresolved merge text is shipped. |
+| npm manifest/lock consistency | Passes `npm run check:manifests` | `npm ci` can install reproducibly. |
+| Type check and unit tests | Pass | No known compile/test blocker. |
+| Production build | Pass | Vite produces the `dist` directory Pages expects. |
+| PWA assets | Fixed | References to the missing `apple-touch-icon.png` and `masked-icon.svg` were removed from the precache list. |
+| Built artifact completeness | Guard added | `npm run build:cloudflare` now fails if the HTML, PWA files, local assets, or manifest icons are absent/empty. |
+| Bundle size | Warning only | The main JavaScript chunk exceeds 500 kB; it can slow previews but does not fail deployment. |
+| Runtime CDN dependencies | Operational risk | Three.js and Online 3D Viewer load from public CDNs, so a CDN/network outage can leave the deployed viewer unusable even when Pages succeeds. |
+
 ## Problems found in the beta code
 
 The deployment failure had several independent configuration conflicts:
@@ -66,7 +86,7 @@ install/test/build path.
    | Project name | `med3dviewer` (or an available name) |
    | Production branch | `main` |
    | Framework preset | `Vite` (or `None`; explicit values below win) |
-   | Root directory | `/` |
+   | Root directory | Leave blank (the repository root) |
    | Build command | `npm run build:cloudflare` |
    | Build output directory | `dist` |
 
@@ -86,6 +106,10 @@ install/test/build path.
 7. After the first successful production deployment, add any custom domain under
    **Custom domains** and follow Cloudflare's DNS prompts. Test the generated
    `*.pages.dev` URL before changing production DNS.
+
+> **Important:** leaving Root directory blank is the documented way to use the
+> repository root. Enter a relative folder only for a monorepo. Do not enter a
+> filesystem-style `/`, which can be interpreted differently from an unset root.
 
 The checked-in `wrangler.toml` is a single source of truth for the project name
 and static output directory when using Wrangler locally. It does not replace the
@@ -119,6 +143,10 @@ npm run preview -- --host 127.0.0.1
 Open the URL printed by Vite and verify that direct navigation, asset loading,
 PWA registration, and model import work. A large-bundle warning is advisory; a
 nonzero command exit is a deployment blocker.
+
+`build:cloudflare` deliberately validates the npm manifests before Vite and the
+generated artifact after Vite. The final success line should say
+`Cloudflare artifact is complete`.
 
 ## Troubleshooting and rollback
 

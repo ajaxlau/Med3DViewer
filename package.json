@@ -10,10 +10,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:cloudflare": "npm run build",
+    "build:cloudflare": "npm run check:manifests && npm run build && npm run check:dist",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "check:manifests": "node scripts/validate-manifests.mjs",
+    "check:dist": "node scripts/validate-dist.mjs",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },
