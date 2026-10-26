@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  assertPreviewTrigger, repairPreviewTrigger, cloudflareApi, buildLogLines,
+  assertPreviewTrigger, repairPreviewTrigger, cloudflareApi, buildLogLines, inspectDeploymentTokens,
   BAD_COMMAND, PREVIEW_COMMAND, PREVIEW_BRANCH, FAILED_BUILD_ID,
 } from '../scripts/repair-cloudflare-preview.mjs';
 
@@ -114,4 +114,20 @@ test('Cloudflare timestamp/message tuples preserve actual build errors', () => {
     'Executing user deploy command: npx wrangler preview',
     '[ERROR] Authentication failed', 'plain message', 'object message',
   ]);
+});
+
+test('deployment token inspection is read-only and reports metadata only', async () => {
+  const mock = fakeApi();
+  const reports = [];
+  const api = async (method, resource, body) => {
+    if (resource === '/builds/tokens?per_page=200') {
+      assert.equal(method, 'GET');
+      return [{ build_token_uuid: uuid, build_token_name: 'Build token', owner_type: 'user', unexpected_secret: 'must-never-appear' }];
+    }
+    return mock.api(method, resource, body);
+  };
+  await inspectDeploymentTokens(api, value => reports.push(value));
+  assert.equal(mock.calls.every(call => call.method === 'GET'), true);
+  assert.equal(JSON.stringify(reports).includes('must-never-appear'), false);
+  assert.deepEqual(reports.at(-1), { deployment_token: { build_token_uuid: uuid, build_token_name: 'Build token', owner_type: 'user' } });
 });

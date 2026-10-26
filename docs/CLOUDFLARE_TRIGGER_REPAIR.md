@@ -68,15 +68,23 @@ and prints the non-secret summaries for review. Do not loosen these checks merel
 to make the job pass. If Cloudflare itself does not retain a PATCH, collect that
 evidence for Cloudflare support.
 
-The job monitors the explicitly selected preview trigger, reports its actual
-command and Preview URL, and prints selected error lines on failure. GitHub logs
+The job can monitor the explicitly selected preview trigger, report its actual
+command and Preview URL, and print selected error lines on failure. GitHub logs
 can then be read by the agent without more phone screenshots.
+
+After the command correction, the deployment identity returned `Invalid access
+token [code: 9109]`. The workflow is now temporarily in read-only
+`--inspect-tokens` mode. It lists build-token names and UUIDs, including the
+selected trigger's token UUID, without credential values or any configuration
+write. The owner must create a replacement deployment token in Cloudflare; the
+GitHub repair token is separate and is already working.
 
 ## Validation and cleanup
 
 Run `node --test tests/cloudflarePreviewRepair.test.mjs` to test the safeguards
 without credentials. Running the script locally without flags is inspection-only;
-the temporary workflow explicitly passes `--apply --start-build --wait`.
+the repair mode explicitly passes `--apply --start-build --wait`. The current
+workflow's `--inspect-tokens` mode performs only reads.
 
 After the native command is used successfully, verify a normal Git push also uses
 the corrected preview trigger and complete the app acceptance checks in

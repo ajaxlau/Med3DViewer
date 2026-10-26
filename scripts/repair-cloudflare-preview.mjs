@@ -45,6 +45,7 @@ function summary(trigger) {
     build_command: trigger.build_command,
     deploy_command: trigger.deploy_command,
     root_directory: trigger.root_directory,
+    build_token_uuid: trigger.build_token_uuid,
     deleted: Boolean(trigger.deleted_on),
   };
 }
@@ -121,6 +122,19 @@ export function buildLogLines(logs) {
   });
 }
 
+export async function inspectDeploymentTokens(api, report) {
+  await repairPreviewTrigger({ api, report });
+  const tokens = await api('GET', '/builds/tokens?per_page=200');
+  assert(Array.isArray(tokens), 'Unexpected build-token list response.');
+  for (const token of tokens) {
+    report({ deployment_token: {
+      build_token_uuid: token.build_token_uuid,
+      build_token_name: token.build_token_name,
+      owner_type: token.owner_type,
+    } });
+  }
+}
+
 async function waitForBuild(api, buildUuid, report) {
   const deadline = Date.now() + 5 * 60_000;
   while (Date.now() < deadline) {
@@ -159,9 +173,14 @@ async function main() {
   const api = cloudflareApi(token);
   // Only allow known options; inspecting is the default when run locally.
   const flags = new Set(process.argv.slice(2));
-  assert([...flags].every(f => ['--apply', '--start-build', '--wait'].includes(f)), 'Unknown command option.');
+  assert([...flags].every(f => ['--apply', '--start-build', '--wait', '--inspect-tokens'].includes(f)), 'Unknown command option.');
   assert(!flags.has('--wait') || flags.has('--start-build'), '--wait requires --start-build.');
   const report = value => console.log(JSON.stringify(value).split(token).join('[REDACTED]'));
+  if (flags.has('--inspect-tokens')) {
+    assert(flags.size === 1, '--inspect-tokens is read-only and cannot be combined with write options.');
+    await inspectDeploymentTokens(api, report);
+    return;
+  }
   const result = await repairPreviewTrigger({
     api,
     apply: flags.has('--apply'),

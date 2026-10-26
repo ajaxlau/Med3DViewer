@@ -58,6 +58,25 @@ token or an authorization error, verify access to the correct account/Worker and
 replace an invalid token through the dashboard API-token selector. Never paste
 token values into chat, source, or browser-exposed `VITE_*` variables.
 
+## Existing branch trigger commands
+
+On 2026-10-26, authenticated API inspection found a dedicated build trigger for
+`codex/review-beta-branch-for-conflicts-and-bugs`. Its branch include list contained
+only that exact feature branch. It still stored `npx wrangler preview:cloudflare`
+after the owner saved a different command in Previews Base and cycled previews.
+Updating that trigger's `deploy_command` through the Builds API and reading it
+back confirmed the native command was retained and used by the next build.
+
+When displayed settings and executed commands differ, inspect the existing
+branch trigger through the [Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/).
+Verify the Worker, repository, and branch filters before updating only its
+command. Do not infer the selected branch from the dashboard's Production
+breadcrumb; check the build source commit and its recorded settings.
+
+An API `10429` / HTTP 429 error after Wrangler starts is a separate rate-limit
+failure. Stop concurrent retries and honor `Retry-After` where available. See
+[Cloudflare API limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/).
+
 ## Acceptance: run a new non-production build
 
 1. Save those settings, then start a build for the updated PR #10 branch. Verify
