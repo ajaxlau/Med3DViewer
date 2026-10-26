@@ -6,6 +6,8 @@ export const REFERENCE_BUILD = '983045cb-3d69-4599-bcd2-f2ec7a9b882b';
 export const TOKEN = 'ade69c15-04e0-42d6-94ad-77f510510155';
 export const BUILD_COMMAND = 'npm run build:cloudflare';
 export const PREVIEW_COMMAND = 'npx wrangler preview --config ./wrangler.jsonc';
+// Exact mobile-pasted command observed through authenticated beta inspection.
+export const MALFORMED_PREVIEW_COMMAND = 'npx wrangler preview —config ./wrangler.jsonc';
 
 export function validateBeta(trigger, tag) {
   assert(trigger && !trigger.deleted_on, 'Missing/deleted beta trigger.');
@@ -16,7 +18,7 @@ export function validateBeta(trigger, tag) {
   assert(Array.isArray(trigger.branch_excludes) && trigger.branch_excludes.every(b => b === 'main'));
   assert(['/', '.', ''].includes(trigger.root_directory));
   assert(['npm run build', BUILD_COMMAND].includes(trigger.build_command), 'Unexpected build command.');
-  assert(['npx wrangler preview', PREVIEW_COMMAND].includes(trigger.deploy_command), 'Unexpected preview command.');
+  assert(['npx wrangler preview', PREVIEW_COMMAND, MALFORMED_PREVIEW_COMMAND].includes(trigger.deploy_command), 'Unexpected preview command.');
   assert(/^[a-f0-9-]{36}$/i.test(trigger.trigger_uuid));
 }
 

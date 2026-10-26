@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { repairBeta, validateBeta, apiClient, REFERENCE_BUILD, TOKEN, BUILD_COMMAND, PREVIEW_COMMAND } from '../scripts/repair-beta-build.mjs';
+import { repairBeta, validateBeta, apiClient, REFERENCE_BUILD, TOKEN, BUILD_COMMAND, PREVIEW_COMMAND, MALFORMED_PREVIEW_COMMAND } from '../scripts/repair-beta-build.mjs';
 
 const tag = 'a'.repeat(32), id = '11111111-1111-1111-1111-111111111111', sha = 'b'.repeat(40);
 const trigger = () => ({ external_script_id: tag, trigger_uuid: id, branch_includes: ['beta'], branch_excludes: [],
@@ -55,6 +55,13 @@ test('already-correct beta settings are idempotent', async () => {
   const result = await repairBeta({ api: mock.api, apply: true });
   assert.equal(result.changed, false);
   assert(mock.calls.every(c => c.method === 'GET'));
+});
+test('the exact observed long-dash typo is repaired only on beta', async () => {
+  const mock = fake({ initial: { ...trigger(), deploy_command: MALFORMED_PREVIEW_COMMAND } });
+  await repairBeta({ api: mock.api, apply: true });
+  assert.equal(mock.calls.find(c => c.method === 'PATCH').body.deploy_command, PREVIEW_COMMAND);
+  assert.throws(() => validateBeta({ ...trigger(), branch_includes: ['main'], deploy_command: MALFORMED_PREVIEW_COMMAND }, tag));
+  assert.throws(() => validateBeta({ ...trigger(), deploy_command: 'npx wrangler preview --unknown-command' }, tag));
 });
 test('missing token, environment override and failed readback prevent uploads', async () => {
   for (const options of [{ tokenName: 'another app' }, { variables: { CLOUDFLARE_API_TOKEN: { value: 'never-print' } } }, { retain: false }]) {
