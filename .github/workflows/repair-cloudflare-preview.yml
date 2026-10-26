@@ -1,0 +1,34 @@
+name: Repair Cloudflare preview trigger
+
+on:
+  push:
+    branches: ["codex/review-beta-branch-for-conflicts-and-bugs"]
+    paths:
+      - '.github/workflows/repair-cloudflare-preview.yml'
+      - 'scripts/repair-cloudflare-preview.mjs'
+      - 'tests/cloudflarePreviewRepair.test.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-preview-trigger-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Inspect and repair only the preview trigger
+    if: github.repository == 'ajaxlau/Med3DViewer' && github.ref == 'refs/heads/codex/review-beta-branch-for-conflicts-and-bugs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test repair safeguards without credentials
+        run: node --test tests/cloudflarePreviewRepair.test.mjs
+      - name: Inspect stored trigger, repair its command, and verify a preview build
+        env:
+          CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
+        run: node scripts/repair-cloudflare-preview.mjs --apply --start-build --wait
