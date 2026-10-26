@@ -85,6 +85,30 @@ An API `10429` / HTTP 429 error after Wrangler starts is a separate rate-limit
 failure. Stop concurrent retries and honor `Retry-After` where available. See
 [Cloudflare API limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/).
 
+## Verified preview on 2026-10-26
+
+The [PR #10 branch preview](https://codex-review-beta-branch-for-conflicts-and-bugs-ntec3dpo-m3dv.x-panda.workers.dev)
+successfully deployed using the corrected native command and the owner-selected
+`med3dviewer build token`. The initial successful upload was build
+`a5df33e2-b974-4745-aaf8-b8d5c89c8e7c` at commit `c5afb620`. A subsequent ordinary
+Git push at commit `e00613be` passed both GitHub CI and Cloudflare build
+`a63bb0dd-07e5-4e89-afc5-1d7b1f2ab979`, without an API-triggered build.
+
+Live checks confirmed successful responses and expected content types for HTML,
+hashed JavaScript/CSS, icons, manifest, registration script, and service worker.
+A browser navigation received the SPA fallback; a missing JavaScript asset
+returned HTTP 404. Chromium loaded the external 3D
+engine, imported a synthetic STL through Browse Files, reached the ready state,
+and accepted camera shortcuts with no JavaScript page errors. A fresh mobile
+viewport also initialized successfully. Physical-device performance and full
+planning workflows remain manual acceptance checks.
+
+The temporary API repair workflow, helper, and repair-specific tests have been
+removed. Native Cloudflare Git integration now handles previews. The owner can
+delete the temporary `CF_BUILDS_REPAIR_TOKEN` GitHub Actions secret and revoke the
+`Med3DViewer temporary preview repair` Cloudflare profile token. Keep the working
+`med3dviewer build token` selected for deployment.
+
 ## Acceptance: run a new non-production build
 
 1. Save those settings, then start a build for the updated PR #10 branch. Verify
