@@ -123,11 +123,18 @@ monitor timed out before the upload completed; that timeout was not an app build
 failure. Account build minutes remained available. A token selector on the
 individual beta page was not verified; do not assume that UI exists.
 
-The privileged beta repair workflow, helper, and repair-specific tests are
-removed. The temporary public-preview smoke check uses no credentials and only
-reads deployed assets. Delete `CF_BUILDS_REPAIR_TOKEN` from GitHub Actions secrets
-and revoke its separate temporary Cloudflare profile token after verification.
-Keep the working `med3dviewer build token` selected for deployment.
+An ordinary Git push at commit `560273556` passed GitHub CI and Cloudflare
+preview build `8cf470dc-fc14-4391-abc4-3d040196d12f`, without an API-triggered
+build. The [beta preview](https://beta-ntec3dpo-m3dv.x-panda.workers.dev/) passed
+public HTTP checks for its HTML, hashed JavaScript/CSS, icons, manifest and
+service-worker assets; missing JavaScript returned HTTP 404.
+
+The temporary repair and public verification workflows, repair helper, and
+repair-specific tests are removed. Regular GitHub CI needs no Cloudflare secret;
+Cloudflare's Git integration owns deployment. The owner can now delete
+`CF_BUILDS_REPAIR_TOKEN` from GitHub Actions secrets and revoke its separate
+temporary Cloudflare profile token. Keep the working `med3dviewer build token`
+selected for deployment.
 
 
 1. Save those settings, then start a fresh non-production build. PR #10 is merged
