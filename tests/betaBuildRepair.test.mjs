@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { repairBeta, validateBeta, apiClient, REFERENCE_BUILD, TOKEN, BUILD_COMMAND, PREVIEW_COMMAND, MALFORMED_PREVIEW_COMMAND } from '../scripts/repair-beta-build.mjs';
+import { repairBeta, validateBeta, apiClient, REFERENCE_BUILD, TOKEN, BUILD_COMMAND, PREVIEW_COMMAND, MALFORMED_PREVIEW_COMMAND, cancelQueuedBetaBuild } from '../scripts/repair-beta-build.mjs';
 
 const tag = 'a'.repeat(32), id = '11111111-1111-1111-1111-111111111111', sha = 'b'.repeat(40);
 const trigger = () => ({ external_script_id: tag, trigger_uuid: id, branch_includes: ['beta'], branch_excludes: [],
@@ -83,4 +83,26 @@ test('missing credentials fail before requests and API errors redact the credent
   const api = apiClient(token, async () => ({ ok: false, status: 403,
     json: async () => ({ success: false, errors: [{ message: token }] }) }));
   await assert.rejects(api('GET', '/builds/tokens'), e => !e.message.includes(token) && e.message.includes('[REDACTED]'));
+});
+
+test('only queued builds on the identified beta trigger and known repair commits can be cancelled', async () => {
+  const good = { status: 'queued', build_trigger_metadata: { branch: 'beta', provider_account_name: 'ajaxlau', repo_name: 'Med3DViewer', commit_hash: sha },
+    trigger: { ...trigger(), external_script_id: '24ad5277946e482fa74593ac733fddc3', trigger_uuid: 'bdf31ebc-1f8c-4a70-87ff-1066205ad197' } };
+  for (const build of [good, { ...good, status: 'running' },
+    { ...good, build_trigger_metadata: { ...good.build_trigger_metadata, branch: 'main' } },
+    { ...good, build_trigger_metadata: { ...good.build_trigger_metadata, commit_hash: 'unknown' } },
+    { ...good, trigger: { ...good.trigger, external_script_id: tag } }]) {
+    const calls = [];
+    const api = async (method, path) => { calls.push({ method, path }); return build; };
+    if (build === good) {
+      assert.equal(await cancelQueuedBetaBuild(api, id, [sha]), true);
+      assert.deepEqual(calls.at(-1), { method: 'PUT', path: `/builds/builds/${id}/cancel` });
+    } else if (build.status === 'running') {
+      assert.equal(await cancelQueuedBetaBuild(api, id, [sha]), false);
+      assert.equal(calls.length, 1);
+    } else {
+      await assert.rejects(cancelQueuedBetaBuild(api, id, [sha]));
+      assert(calls.every(c => c.method === 'GET'));
+    }
+  }
 });

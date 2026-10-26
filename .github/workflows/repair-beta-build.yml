@@ -15,7 +15,7 @@ jobs:
   repair:
     if: github.repository == 'ajaxlau/Med3DViewer' && github.ref == 'refs/heads/beta'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,40 +23,43 @@ jobs:
           node-version: 22
       - name: Test beta-only repair safeguards
         run: node --test tests/betaBuildRepair.test.mjs
-      - name: Inspect the pending beta build without changing Cloudflare settings
+      - name: Retry beta once after cancelling only its known queued repair builds
         env:
           CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import { apiClient, repairBeta } from './scripts/repair-beta-build.mjs';
+          import { apiClient, repairBeta, cancelQueuedBetaBuild, monitor } from './scripts/repair-beta-build.mjs';
+          assert.equal(process.env.GITHUB_REF_NAME, 'beta');
           const token = process.env.CF_BUILDS_REPAIR_TOKEN;
           const api = apiClient(token);
           const report = data => console.log(JSON.stringify(data).split(token).join('[REDACTED]'));
           await repairBeta({ api, report });
           const limits = await api('GET', '/builds/account/limits');
-          report({ build_limits: limits });
+          assert.equal(limits.has_reached_build_minutes_limit, false, 'The account has reached its build-minute limit.');
           const recent = await api('GET', '/builds/workers/24ad5277946e482fa74593ac733fddc3/builds?per_page=30');
-          assert(Array.isArray(recent), 'Unexpected build-list response.');
-          for (const item of recent) report({ recent_beta_build: { build_uuid: item.build_uuid,
-            status: item.status, outcome: item.build_outcome, created_on: item.created_on,
-            branch: item.build_trigger_metadata?.branch, commit: item.build_trigger_metadata?.commit_hash } });
-          const id = 'dc626443-6891-4da3-b0a8-2e92e2325b49';
-          const build = await api('GET', `/builds/builds/${id}`);
-          assert.equal(build.build_trigger_metadata?.branch, 'beta');
-          assert.equal(build.build_trigger_metadata?.provider_account_name, 'ajaxlau');
-          report({ build_uuid: id, status: build.status, outcome: build.build_outcome,
-            preview_url: build.preview_url, created_on: build.created_on, completed_on: build.completed_on });
-          const lines = [];
-          let cursor = '';
-          for (let page = 0; page < 20; page++) {
-            const log = await api('GET', `/builds/builds/${id}/logs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
-            for (const entry of log.lines ?? []) {
-              const line = Array.isArray(entry) ? entry.find(p => typeof p === 'string') : typeof entry === 'string' ? entry : entry?.line;
-              if (typeof line === 'string') lines.push(line);
+          assert(Array.isArray(recent));
+          const allowedCommits = [
+            '2e3940a7b98c2788b364dafe3b02dcf821555817',
+            'edde10a3c64ed82aaea0904c347ba5b49d47ef53',
+            'eed5a8a3bd972390212e348ef529deb754a37b0f',
+            '87166f68a021195d4a74a809ee3167c52dbd0793',
+            'cba704bad236919f5c238b203a33201b0b547e57',
+            process.env.GITHUB_SHA,
+          ];
+          let watchId = recent.find(b => ['running', 'initializing'].includes(b.status)
+            && b.build_trigger_metadata?.branch === 'beta'
+            && b.build_trigger_metadata?.commit_hash === process.env.GITHUB_SHA)?.build_uuid;
+          if (!watchId) {
+            const candidates = recent.filter(b => b.status === 'queued'
+              && b.build_trigger_metadata?.branch === 'beta'
+              && allowedCommits.includes(b.build_trigger_metadata?.commit_hash));
+            assert(candidates.length <= 10, 'Unexpected queued-build count.');
+            for (const build of candidates) {
+              if (await cancelQueuedBetaBuild(api, build.build_uuid, allowedCommits)) report({ cancelled_queued_beta_build: build.build_uuid });
             }
-            if (!log.truncated || !log.cursor || cursor === log.cursor) break;
-            cursor = log.cursor;
+            const result = await repairBeta({ api, apply: true, startBuild: true, commitSha: process.env.GITHUB_SHA, report });
+            watchId = result.buildUuid;
           }
-          for (const line of lines.slice(-35)) report({ build_log: line });
+          await monitor(api, watchId, report);
           NODE

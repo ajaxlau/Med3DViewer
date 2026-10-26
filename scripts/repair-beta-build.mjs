@@ -100,10 +100,30 @@ export function apiClient(token, fetcher = fetch) {
   };
 }
 
-async function monitor(api, id, report) {
-  const deadline = Date.now() + 300000;
+export async function cancelQueuedBetaBuild(api, id, allowedCommits) {
+  assert(/^[a-f0-9-]{36}$/i.test(id), 'Invalid build identity.');
+  const build = await api('GET', `/builds/builds/${id}`);
+  if (build.status !== 'queued') return false;
+  const metadata = build.build_trigger_metadata;
+  assert.equal(metadata?.branch, 'beta');
+  assert.equal(metadata.provider_account_name, 'ajaxlau');
+  assert(['Med3DViewer', 'ajaxlau/Med3DViewer'].includes(metadata.repo_name));
+  assert(allowedCommits.includes(metadata.commit_hash), 'Only builds from the known repair commits can be cancelled.');
+  validateBeta(build.trigger, '24ad5277946e482fa74593ac733fddc3');
+  assert.equal(build.trigger.trigger_uuid, 'bdf31ebc-1f8c-4a70-87ff-1066205ad197');
+  await api('PUT', `/builds/builds/${id}/cancel`);
+  return true;
+}
+
+export async function monitor(api, id, report) {
+  const deadline = Date.now() + 15 * 60_000;
+  let lastStatus;
   while (Date.now() < deadline) {
     const build = await api('GET', `/builds/builds/${id}`);
+    if (build.status !== lastStatus) {
+      report({ build_uuid: id, status: build.status, outcome: build.build_outcome });
+      lastStatus = build.status;
+    }
     if (build.status === 'stopped') {
       const urls = new Set();
       let cursor = '';
