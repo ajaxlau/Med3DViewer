@@ -23,7 +23,33 @@ jobs:
           node-version: 22
       - name: Test beta-only repair safeguards
         run: node --test tests/betaBuildRepair.test.mjs
-      - name: Repair beta token reference and verify a preview upload
+      - name: Inspect the pending beta build without changing Cloudflare settings
         env:
           CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
-        run: node scripts/repair-beta-build.mjs --apply --start-build
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { apiClient, repairBeta } from './scripts/repair-beta-build.mjs';
+          const token = process.env.CF_BUILDS_REPAIR_TOKEN;
+          const api = apiClient(token);
+          const report = data => console.log(JSON.stringify(data).split(token).join('[REDACTED]'));
+          await repairBeta({ api, report });
+          const id = 'dc626443-6891-4da3-b0a8-2e92e2325b49';
+          const build = await api('GET', `/builds/builds/${id}`);
+          assert.equal(build.build_trigger_metadata?.branch, 'beta');
+          assert.equal(build.build_trigger_metadata?.provider_account_name, 'ajaxlau');
+          report({ build_uuid: id, status: build.status, outcome: build.build_outcome,
+            preview_url: build.preview_url, created_on: build.created_on, completed_on: build.completed_on });
+          const lines = [];
+          let cursor = '';
+          for (let page = 0; page < 20; page++) {
+            const log = await api('GET', `/builds/builds/${id}/logs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+            for (const entry of log.lines ?? []) {
+              const line = Array.isArray(entry) ? entry.find(p => typeof p === 'string') : typeof entry === 'string' ? entry : entry?.line;
+              if (typeof line === 'string') lines.push(line);
+            }
+            if (!log.truncated || !log.cursor || cursor === log.cursor) break;
+            cursor = log.cursor;
+          }
+          for (const line of lines.slice(-35)) report({ build_log: line });
+          NODE
