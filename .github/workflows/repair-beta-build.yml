@@ -34,6 +34,13 @@ jobs:
           const api = apiClient(token);
           const report = data => console.log(JSON.stringify(data).split(token).join('[REDACTED]'));
           await repairBeta({ api, report });
+          const limits = await api('GET', '/builds/account/limits');
+          report({ build_limits: limits });
+          const recent = await api('GET', '/builds/workers/24ad5277946e482fa74593ac733fddc3/builds?per_page=30');
+          assert(Array.isArray(recent), 'Unexpected build-list response.');
+          for (const item of recent) report({ recent_beta_build: { build_uuid: item.build_uuid,
+            status: item.status, outcome: item.build_outcome, created_on: item.created_on,
+            branch: item.build_trigger_metadata?.branch, commit: item.build_trigger_metadata?.commit_hash } });
           const id = 'dc626443-6891-4da3-b0a8-2e92e2325b49';
           const build = await api('GET', `/builds/builds/${id}`);
           assert.equal(build.build_trigger_metadata?.branch, 'beta');
