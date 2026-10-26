@@ -111,6 +111,33 @@ delete the temporary `CF_BUILDS_REPAIR_TOKEN` GitHub Actions secret and revoke t
 
 ## Acceptance: run a new non-production build
 
+After merging PR #10 into `beta`, its 2026-10-26 build compiled successfully but
+the preview upload returned `Invalid access token [9109]`. The successful PR #10
+feature-branch repair does not establish that another existing preview has the
+same token reference. The beta-specific page exposes commands and tracking-branch
+settings; a separate API-token selector there has not been confirmed. Avoid
+repeatedly changing commands to resolve an authentication error.
+
+The temporary `Repair beta preview credential` Actions workflow is restricted to
+this repository and `beta`. It anchors inspection to failed beta build
+`983045cb-3d69-4599-bcd2-f2ec7a9b882b`, accepts only an exact beta-only trigger,
+checks for credential overrides, verifies the registered owner-selected
+`med3dviewer build token`, updates only that trigger's commands/token reference,
+and requires readback before starting a beta preview. It cannot target `main`.
+It never logs token values or build-variable values.
+
+To authorize the API requests, restore the temporary `CF_BUILDS_REPAIR_TOKEN`
+[repository Actions secret](https://github.com/ajaxlau/Med3DViewer/settings/secrets/actions/new).
+If its former Cloudflare token was revoked, create a fresh **user-profile** token
+at [Cloudflare API tokens](https://dash.cloudflare.com/profile/api-tokens) with
+only **Account > Workers Builds Configuration > Edit**, restricted to account
+`9653dc93bd5d739089edd92b89aded14`. Copy its value directly into that GitHub secret;
+never into chat. This repair credential is separate from the working deployment
+token. Rerun the prepared job after saving the secret. Remove the temporary job,
+script and tests, then delete/revoke the repair credential only after a normal
+beta push succeeds.
+
+
 1. Save those settings, then start a build for the updated PR #10 branch. Verify
    the logged commit SHA includes this repair; `main` and `beta` do not yet contain
    it. Do not test with a production deployment.

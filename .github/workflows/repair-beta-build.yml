@@ -1,0 +1,29 @@
+name: Repair beta preview credential
+on:
+  push:
+    branches: [beta]
+    paths:
+      - .github/workflows/repair-beta-build.yml
+      - scripts/repair-beta-build.mjs
+      - tests/betaBuildRepair.test.mjs
+permissions:
+  contents: read
+concurrency:
+  group: beta-preview-credential-repair
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.repository == 'ajaxlau/Med3DViewer' && github.ref == 'refs/heads/beta'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test beta-only repair safeguards
+        run: node --test tests/betaBuildRepair.test.mjs
+      - name: Repair beta token reference and verify a preview upload
+        env:
+          CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
+        run: node scripts/repair-beta-build.mjs --apply --start-build
