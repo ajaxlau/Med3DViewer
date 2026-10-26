@@ -18,18 +18,19 @@ jobs:
   validate:
     name: Install, test, and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate npm manifests
-        run: node scripts/validate-manifests.mjs
-      
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
+
+      - name: Validate npm manifests
+        run: npm run check:manifests
           
       - name: Install dependencies
         run: npm ci
@@ -40,5 +41,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build the Cloudflare Pages artifact
+      - name: Build the Cloudflare Workers artifact
         run: npm run build:cloudflare
+
+      - name: Validate Worker packaging without publishing
+        run: npm run check:cloudflare
