@@ -138,7 +138,13 @@ export function buildLogLines(logs) {
 }
 
 export async function inspectDeploymentTokens(api, report) {
-  await repairPreviewTrigger({ api, report });
+  const { triggerUuid } = await repairPreviewTrigger({ api, report });
+  const variables = await api('GET', `/builds/triggers/${triggerUuid}/environment_variables`);
+  assert(variables && typeof variables === 'object' && !Array.isArray(variables), 'Unexpected build-variable response.');
+  // Values may contain credentials even when is_secret is false. Report names only.
+  report({ build_variables: Object.entries(variables).map(([name, variable]) => ({
+    name, is_secret: variable?.is_secret === true,
+  })) });
   const tokens = await api('GET', '/builds/tokens?per_page=200');
   assert(Array.isArray(tokens), 'Unexpected build-token list response.');
   for (const token of tokens) {

@@ -27,6 +27,7 @@ function fakeApi({ initial = trigger(), retainPatch = true, tokens = [{ build_to
       trigger: { external_script_id: tag, trigger_uuid: uuid },
     };
     if (method === 'GET' && resource.endsWith('/triggers')) return [structuredClone(stored)];
+    if (method === 'GET' && resource.endsWith('/environment_variables')) return {};
     if (method === 'GET' && resource === '/builds/tokens?per_page=200') return structuredClone(tokens);
     if (method === 'PATCH') {
       if (retainPatch) stored = { ...stored, ...body };
@@ -118,10 +119,17 @@ test('Cloudflare timestamp/message tuples preserve actual build errors', () => {
   ]);
 });
 
-test('deployment token inspection is read-only and reports metadata only', async () => {
+test('deployment token and build-variable inspection is read-only and never reports values', async () => {
   const mock = fakeApi();
   const reports = [];
   const api = async (method, resource, body) => {
+    if (resource.endsWith('/environment_variables')) {
+      assert.equal(method, 'GET');
+      return {
+        CLOUDFLARE_API_TOKEN: { value: 'must-never-appear', is_secret: false },
+        OTHER_SECRET: { value: 'must-never-appear', is_secret: true },
+      };
+    }
     if (resource === '/builds/tokens?per_page=200') {
       assert.equal(method, 'GET');
       return [{ build_token_uuid: uuid, build_token_name: 'Build token', owner_type: 'user', unexpected_secret: 'must-never-appear' }];
@@ -131,6 +139,10 @@ test('deployment token inspection is read-only and reports metadata only', async
   await inspectDeploymentTokens(api, value => reports.push(value));
   assert.equal(mock.calls.every(call => call.method === 'GET'), true);
   assert.equal(JSON.stringify(reports).includes('must-never-appear'), false);
+  assert.deepEqual(reports.find(report => report.build_variables), { build_variables: [
+    { name: 'CLOUDFLARE_API_TOKEN', is_secret: false },
+    { name: 'OTHER_SECRET', is_secret: true },
+  ] });
   assert.deepEqual(reports.at(-1), { deployment_token: { build_token_uuid: uuid, build_token_name: 'Build token', owner_type: 'user' } });
 });
 

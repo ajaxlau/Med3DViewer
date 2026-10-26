@@ -85,12 +85,18 @@ checks the old binding against the two known UUIDs, and verifies readback before
 uploading. It never retrieves, creates, modifies, or revokes credential values;
 the PATCH changes only the guarded preview trigger's `build_token_uuid` field.
 
+The existing Worker-specific token also returned `9109` after a fresh retry.
+The current workflow is read-only: it lists registered token metadata and the
+selected preview trigger's build-variable names and secret flags to check for a
+credential override. It never logs build-variable values, even for plain-text
+variables. It does not start another build through the API.
+
 ## Validation and cleanup
 
 Run `node --test tests/cloudflarePreviewRepair.test.mjs` to test the safeguards
 without credentials. Running the script locally without flags is inspection-only;
-the current repair mode explicitly passes
-`--apply --use-worker-token --start-build --wait`. `--inspect-tokens` performs only
+the write mode explicitly passes
+`--apply --use-worker-token --start-build --wait`. The current `--inspect-tokens` mode performs only
 reads and cannot be combined with write options.
 
 After the native command is used successfully, verify a normal Git push also uses
