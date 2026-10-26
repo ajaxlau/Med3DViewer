@@ -8,6 +8,7 @@ export const BAD_COMMAND = 'npx wrangler preview:cloudflare';
 export const PREVIEW_COMMAND = 'npx wrangler preview --config ./wrangler.jsonc';
 export const INVALID_DEPLOY_TOKEN_UUID = '36a345a3-fcc8-4541-b787-9fb209923de9';
 export const WORKER_DEPLOY_TOKEN_UUID = '0ab162f0-f44c-4068-85ce-358437d49fc8';
+export const MED3DVIEWER_DEPLOY_TOKEN_UUID = 'ade69c15-04e0-42d6-94ad-77f510510155';
 const BUILD_COMMAND = 'npm run build:cloudflare';
 
 function assert(condition, message) {
@@ -52,8 +53,9 @@ function summary(trigger) {
   };
 }
 
-export async function repairPreviewTrigger({ api, apply = false, startBuild = false, useWorkerToken = false, commitHash, branch = PREVIEW_BRANCH, report = () => {} }) {
+export async function repairPreviewTrigger({ api, apply = false, startBuild = false, useWorkerToken = false, useMed3dviewerToken = false, commitHash, branch = PREVIEW_BRANCH, report = () => {} }) {
   assert(branch === PREVIEW_BRANCH, 'Only the PR #10 feature branch may be built.');
+  assert(!(useWorkerToken && useMed3dviewerToken), 'Select only one deployment token.');
   assert(!startBuild || (apply && /^[\da-f]{40}$/i.test(commitHash ?? '')), 'Starting a build requires --apply and a full commit SHA.');
   const build = await api('GET', `/builds/builds/${FAILED_BUILD_ID}`);
   const metadata = build.build_trigger_metadata;
@@ -81,14 +83,16 @@ export async function repairPreviewTrigger({ api, apply = false, startBuild = fa
   assert(current.deploy_command === selected.deploy_command, 'Trigger changed during inspection; retry inspection first.');
   const patch = {};
   if (current.deploy_command === BAD_COMMAND) patch.deploy_command = PREVIEW_COMMAND;
-  if (useWorkerToken) {
+  const targetTokenUuid = useMed3dviewerToken ? MED3DVIEWER_DEPLOY_TOKEN_UUID : useWorkerToken ? WORKER_DEPLOY_TOKEN_UUID : undefined;
+  if (targetTokenUuid) {
     const tokens = await api('GET', '/builds/tokens?per_page=200');
     assert(Array.isArray(tokens), 'Unexpected build-token list response.');
-    const replacement = tokens.find(token => token.build_token_uuid === WORKER_DEPLOY_TOKEN_UUID);
-    assert(replacement?.build_token_name === 'ntec3dpo-m3dv build token' && replacement.owner_type === 'user', 'The expected Worker-specific deployment token is not registered.');
+    const replacement = tokens.find(token => token.build_token_uuid === targetTokenUuid);
+    const expectedName = useMed3dviewerToken ? 'med3dviewer build token' : 'ntec3dpo-m3dv build token';
+    assert(replacement?.build_token_name === expectedName && replacement.owner_type === 'user', 'The expected deployment token is not registered.');
     assert(current.build_token_uuid === selected.build_token_uuid, 'The deployment token changed during inspection.');
-    assert([INVALID_DEPLOY_TOKEN_UUID, WORKER_DEPLOY_TOKEN_UUID].includes(current.build_token_uuid), 'Unexpected deployment-token binding; refusing to replace it.');
-    if (current.build_token_uuid !== WORKER_DEPLOY_TOKEN_UUID) patch.build_token_uuid = WORKER_DEPLOY_TOKEN_UUID;
+    assert([INVALID_DEPLOY_TOKEN_UUID, WORKER_DEPLOY_TOKEN_UUID, MED3DVIEWER_DEPLOY_TOKEN_UUID].includes(current.build_token_uuid), 'Unexpected deployment-token binding; refusing to replace it.');
+    if (current.build_token_uuid !== targetTokenUuid) patch.build_token_uuid = targetTokenUuid;
   }
   const changed = Object.keys(patch).length > 0;
   if (changed) {
@@ -98,7 +102,7 @@ export async function repairPreviewTrigger({ api, apply = false, startBuild = fa
   const verified = (await api('GET', listPath)).find(t => t.trigger_uuid === selected.trigger_uuid);
   assertPreviewTrigger(verified, workerTag);
   assert(verified.deploy_command === PREVIEW_COMMAND, 'The API did not retain the corrected preview command.');
-  if (useWorkerToken) assert(verified.build_token_uuid === WORKER_DEPLOY_TOKEN_UUID, 'The API did not retain the Worker-specific deployment token.');
+  if (targetTokenUuid) assert(verified.build_token_uuid === targetTokenUuid, 'The API did not retain the selected deployment token.');
   report({ verified_trigger: summary(verified), changed });
 
   if (!startBuild) return { triggerUuid: selected.trigger_uuid, changed };
@@ -194,9 +198,10 @@ async function main() {
   const api = cloudflareApi(token);
   // Only allow known options; inspecting is the default when run locally.
   const flags = new Set(process.argv.slice(2));
-  assert([...flags].every(f => ['--apply', '--start-build', '--wait', '--inspect-tokens', '--use-worker-token'].includes(f)), 'Unknown command option.');
+  assert([...flags].every(f => ['--apply', '--start-build', '--wait', '--inspect-tokens', '--use-worker-token', '--use-med3dviewer-token'].includes(f)), 'Unknown command option.');
   assert(!flags.has('--wait') || flags.has('--start-build'), '--wait requires --start-build.');
   assert(!flags.has('--use-worker-token') || flags.has('--apply'), '--use-worker-token requires --apply.');
+  assert(!flags.has('--use-med3dviewer-token') || flags.has('--apply'), '--use-med3dviewer-token requires --apply.');
   const report = value => console.log(JSON.stringify(value).split(token).join('[REDACTED]'));
   if (flags.has('--inspect-tokens')) {
     assert(flags.size === 1, '--inspect-tokens is read-only and cannot be combined with write options.');
@@ -208,6 +213,7 @@ async function main() {
     apply: flags.has('--apply'),
     startBuild: flags.has('--start-build'),
     useWorkerToken: flags.has('--use-worker-token'),
+    useMed3dviewerToken: flags.has('--use-med3dviewer-token'),
     branch: process.env.GITHUB_REF_NAME ?? PREVIEW_BRANCH,
     commitHash: process.env.GITHUB_SHA,
     report,

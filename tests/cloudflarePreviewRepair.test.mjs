@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   assertPreviewTrigger, repairPreviewTrigger, cloudflareApi, buildLogLines, inspectDeploymentTokens,
   BAD_COMMAND, PREVIEW_COMMAND, PREVIEW_BRANCH, FAILED_BUILD_ID,
-  INVALID_DEPLOY_TOKEN_UUID, WORKER_DEPLOY_TOKEN_UUID,
+  INVALID_DEPLOY_TOKEN_UUID, WORKER_DEPLOY_TOKEN_UUID, MED3DVIEWER_DEPLOY_TOKEN_UUID,
 } from '../scripts/repair-cloudflare-preview.mjs';
 
 const tag = 'a'.repeat(32);
@@ -165,6 +165,22 @@ test('unverified token metadata and failed token readback prevent uploads', asyn
   await assert.rejects(repairPreviewTrigger({ api: wrongName.api, apply: true, useWorkerToken: true }), /not registered/);
   assert.equal(wrongName.calls.some(call => call.method === 'PATCH'), false);
   const notRetained = fakeApi({ initial, retainPatch: false });
-  await assert.rejects(repairPreviewTrigger({ api: notRetained.api, apply: true, useWorkerToken: true, startBuild: true, commitHash: commit }), /did not retain the Worker-specific/);
+  await assert.rejects(repairPreviewTrigger({ api: notRetained.api, apply: true, useWorkerToken: true, startBuild: true, commitHash: commit }), /did not retain the selected deployment token/);
   assert.equal(notRetained.calls.some(call => call.method === 'POST'), false);
+});
+
+test('the owner-selected med3dviewer token is verified and retained before starting a preview', async () => {
+  const initial = { ...trigger(), deploy_command: PREVIEW_COMMAND, build_token_uuid: WORKER_DEPLOY_TOKEN_UUID };
+  const tokens = [{ build_token_uuid: MED3DVIEWER_DEPLOY_TOKEN_UUID, build_token_name: 'med3dviewer build token', owner_type: 'user' }];
+  const mock = fakeApi({ initial, tokens });
+  await repairPreviewTrigger({ api: mock.api, apply: true, useMed3dviewerToken: true, startBuild: true, commitHash: commit });
+  assert.deepEqual(mock.calls.filter(call => call.method === 'PATCH'), [{
+    method: 'PATCH', resource: `/builds/triggers/${uuid}`,
+    body: { build_token_uuid: MED3DVIEWER_DEPLOY_TOKEN_UUID },
+  }]);
+  assert.equal(mock.calls.filter(call => call.method === 'POST').length, 1);
+  const notRetained = fakeApi({ initial, tokens, retainPatch: false });
+  await assert.rejects(repairPreviewTrigger({ api: notRetained.api, apply: true, useMed3dviewerToken: true, startBuild: true, commitHash: commit }), /did not retain the selected deployment token/);
+  assert.equal(notRetained.calls.some(call => call.method === 'POST'), false);
+  await assert.rejects(repairPreviewTrigger({ api: mock.api, apply: true, useWorkerToken: true, useMed3dviewerToken: true }), /Select only one/);
 });
