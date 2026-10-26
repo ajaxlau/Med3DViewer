@@ -115,24 +115,44 @@ This software is developed as an interactive visualization and research planning
 
 ---
 
-## ☁️ Cloudflare Pages Preview
+## ☁️ Cloudflare Workers Static Assets Preview
 
-This static Vite application uses Cloudflare Pages' native Git integration; Wrangler is intentionally not installed or required during the Pages dependency-install step. Configure the Pages project with:
+The current Cloudflare dashboard imports this repository through **Workers
+Builds**. Workers Builds does not show a separate “Build output directory” field;
+the output is declared in `wrangler.jsonc` as `assets.directory = "./dist"`.
+Configure the Worker with:
 
 | Setting | Value |
 | :--- | :--- |
+| Worker name | `ntec3dpo-m3dv` (existing service) |
 | Build command | `npm run build:cloudflare` |
-| Build output directory | `dist` |
+| Static asset directory | `./dist` (checked into `wrangler.jsonc`) |
 | Root directory | `/` (repository root) |
 | Production branch | `main` |
 | Preview branches | All non-production branches (including `beta`) |
-| Node.js version | `20` (also pinned by `.node-version`) |
+| Node.js version | `22` (also pinned by `.node-version`; required by Wrangler) |
+| Deploy command | `npm run deploy:cloudflare` |
+| Preview command (Previews Base) | `npx wrangler preview --config ./wrangler.jsonc` |
+| API token | Keep a valid Workers Builds token; replace only on authentication failure |
 
-Cloudflare automatically creates preview deployments for non-production branches. The checked-in `package.json` and `package-lock.json` must remain synchronized so Cloudflare's `npm clean-install` step can complete. Validate the same install and build locally with:
+This Worker has already switched to **Worker Previews**. Enable preview builds
+for non-production branches. The pinned Wrangler CLI uses `wrangler preview`
+and the `previews` configuration to create a Preview without changing production.
+The checked-in `package.json` and `package-lock.json` must remain synchronized so
+Cloudflare's clean install can complete. The Worker build requires no dashboard
+output-directory field: Wrangler uploads `dist` according to the checked-in
+configuration.
+
+The preview command and production deploy script select `wrangler.jsonc`
+explicitly, and the production deploy script
+also passes `--assets ./dist`. This prevents the
+“Missing entry-point to Worker script or to assets directory” failure even when
+Wrangler does not auto-discover the configuration file.
 
 ```bash
 npm ci
 npm run build:cloudflare
+npm run check:cloudflare
 ```
 
 See [the deployment runbook](docs/DEPLOYMENT.md) for the full GitHub and

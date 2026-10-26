@@ -1,143 +1,183 @@
-# GitHub and Cloudflare Pages deployment runbook
+# Cloudflare Workers build and preview runbook
 
-This repository is a client-only Vite application. Cloudflare Pages should build
-and publish `dist`; there is no Worker entry point, server process, runtime
-secret, or database migration.
+This client-only Vite app publishes static assets to the existing Worker
+`ntec3dpo-m3dv`. `wrangler.jsonc` is the only deployment configuration. It declares
+`assets.directory = "./dist"` and SPA navigation fallback; no Worker script entry
+point, application secret, or database is required.
 
-## Problems found in the beta code
+## Confirmed failure and repair
 
-The deployment failure had several independent configuration conflicts:
+The supplied 2026-10-05 log shows installation and Vite/PWA generation succeeding.
+The subsequent `npx wrangler deploy` reads a Pages configuration and fails with
+`Missing entry-point to Worker script or to assets directory`. The 838 kB chunk
+warning is advisory, not the deployment failure.
 
-1. `package.json` was invalid JSON because the Wrangler dependency key was
-   missing its closing quote. Every npm command therefore stopped before install.
-2. `package-lock.json` still contained Wrangler while the intended Pages setup
-   did not need it. The manifest and lockfile were not a reliable `npm ci` pair.
-3. Two Wrangler configuration files described different applications. The
-   removed `wrangler.jsonc` selected a nonexistent `src/index.ts` Worker entry
-   point, while `wrangler.toml` correctly describes a Pages static output.
-4. GitHub Actions deployed the artifact to **GitHub Pages**, although the
-   repository documentation called for **Cloudflare Pages**. That workflow did
-   not validate pull requests or pushes to `beta`.
-5. The lockfile-update workflow could directly rewrite and push dependency
-   resolution from Node 24 without review, while the deployment workflow used
-   Node 20.
-6. `.env.example` claimed that unused server-side Gemini and Cloud Run variables
-   were required. This app has no server-side runtime; browser-exposed Vite
-   variables must never contain secrets.
+The owner confirmed this Worker has already switched to **Worker Previews**.
+The repair therefore pins Wrangler 4.135.0 (supports Worker Previews), aligns all
+Node pins and CI to Node 22 (required by that CLI), and adds the required empty
+`previews` configuration. Assets remain at the top level. Production uses
+`wrangler deploy`; previews use `wrangler preview` with the branch name selected
+by Cloudflare/Wrangler. Previews do not promote a build to production.
 
-The repository now has one Pages configuration, a pinned Node major, a clean
-lockfile, and a GitHub build check. A dependency-free manifest preflight reports
-invalid JSON or root lockfile drift before dependency installation. Cloudflare's
-Git integration owns deployment; GitHub Actions only validates the exact
-install/test/build path.
+`build:cloudflare` validates npm manifests and the built HTML, PWA files, local
+asset references, and manifest icons. GitHub Actions installs, type-checks,
+tests, builds, and validates packaging without publishing. Cloudflare's Git
+integration owns actual deployment. Do not merge PR #9's alternative Pages
+configuration over this Workers setup.
 
-## One-time GitHub repository setup
+## Manual settings in the existing Worker
 
-1. In **Settings > General > Default branch**, keep `main` as the production
-   branch. Use `beta` as the integration/preview branch.
-2. In **Settings > Actions > General**, allow GitHub Actions and permit the
-   official `actions/checkout` and `actions/setup-node` actions. The workflow
-   needs only read access to repository contents.
-3. Push this branch once and confirm the check named
-   **Build / Install, test, and build** succeeds.
-4. In **Settings > Rules > Rulesets** (or **Branches > Branch protection**), add
-   rules for `main` and `beta`:
-   - require pull requests before merge;
-   - require at least one approval;
-   - require conversation resolution;
-   - require **Build / Install, test, and build**;
-   - optionally require the Cloudflare Pages deployment check after it has run
-     once (GitHub only offers checks it has already observed);
-   - block force pushes and branch deletion.
-5. Do not add Cloudflare account tokens, API tokens, or account IDs as GitHub
-   secrets for this setup. Native Git integration authenticates through the
-   Cloudflare GitHub App.
+Open **Workers & Pages > ntec3dpo-m3dv > Settings > Build**. Keep the existing
+Worker and domains; do not create a replacement Worker or a Pages project.
 
-## One-time Cloudflare Pages setup
+| Setting | Value |
+| --- | --- |
+| Repository | `ajaxlau/Med3DViewer` |
+| Root directory | `/` (repository root in Workers Builds) |
+| Production branch | `main` |
+| Build command | `npm run build:cloudflare` |
+| Deploy command | `npm run deploy:cloudflare` |
+| Preview command (Previews Base) | `npx wrangler preview --config ./wrangler.jsonc` |
+| Preview builds | Enabled for all non-production branches, including `beta` and feature branches |
+| Build variable | `NODE_VERSION=22` (replace the old value of `20`) |
+| Preview model | Worker Previews (already enabled by the owner) |
 
-1. Open **Cloudflare Dashboard > Workers & Pages > Create > Pages > Connect to
-   Git**.
-2. Select GitHub, install/authorize the Cloudflare GitHub App, and grant it
-   access to this repository.
-3. Select the repository and enter these build settings exactly:
+Set the Preview command under **Builds > Previews Base**. Keep the production
+Deploy command under **Builds > Production**. The dashboard preview command uses
+Wrangler directly; `preview:cloudflare` remains an npm script for local use.
+The build command already runs artifact validation before the preview upload.
 
-   | Cloudflare setting | Value |
-   | --- | --- |
-   | Project name | `med3dviewer` (or an available name) |
-   | Production branch | `main` |
-   | Framework preset | `Vite` (or `None`; explicit values below win) |
-   | Root directory | `/` |
-   | Build command | `npm run build:cloudflare` |
-   | Build output directory | `dist` |
+Workers Builds has no output-directory field: `./dist` is declared in source.
+Keep development dependencies installed during the build so Vite, TypeScript,
+and the pinned Wrangler CLI are available. No application runtime secrets or
+bindings are needed in Production or Previews Base for this static app.
 
-4. Under **Settings > Environment variables**, set `NODE_VERSION` to `20` for
-   both Production and Preview. `.node-version` and `.nvmrc` provide the same pin
-   in source for build systems that recognize either convention. No application
-   secrets are required. Never place a private key in a `VITE_*` variable because
-   Vite makes it public in the generated JavaScript.
-5. Under **Settings > Builds > Branch control**:
-   - enable automatic production deployments for `main`;
-   - select **All non-production branches** for previews, or select custom
-     branches and include `beta` plus the team's feature-branch patterns;
-   - do not exclude `beta`.
-6. Save and deploy. A push to `beta` should get a branch preview URL; a pull
-   request from a branch in the same repository should get a PR preview and a
-   Cloudflare status check. Pull requests from forks do not receive preview URLs.
-7. After the first successful production deployment, add any custom domain under
-   **Custom domains** and follow Cloudflare's DNS prompts. Test the generated
-   `*.pages.dev` URL before changing production DNS.
+The owner-selected `med3dviewer build token` successfully uploaded a preview on
+2026-10-26. The two previously bound deployment-token references returned
+`Invalid access token [9109]`. If authentication fails again, verify the token
+reference on the actual branch trigger, access to the correct account/Worker,
+and validity of its credential. Replace an invalid token through the dashboard
+API-token selector. Never paste
+token values into chat, source, or browser-exposed `VITE_*` variables.
 
-The checked-in `wrangler.toml` is a single source of truth for the project name
-and static output directory when using Wrangler locally. It does not replace the
-dashboard's Git build settings, and Wrangler is deliberately not a project
-dependency for native Git deployments.
+## Existing branch trigger commands
 
-## Release flow
+On 2026-10-26, authenticated API inspection found a dedicated build trigger for
+`codex/review-beta-branch-for-conflicts-and-bugs`. Its branch include list contained
+only that exact feature branch. It still stored `npx wrangler preview:cloudflare`
+after the owner saved a different command in Previews Base and cycled previews.
+Updating that trigger's `deploy_command` through the Builds API and reading it
+back confirmed the native command was retained and used by the next build.
 
-1. Create a feature branch from `beta`, then open a pull request into `beta`.
-2. Require the GitHub build check and Cloudflare preview to pass. Exercise model
-   loading, PWA registration, browser refresh, and the preview on desktop and a
-   mobile device.
-3. Merge into `beta` and use its stable branch preview for acceptance testing.
-4. Open a pull request from `beta` to `main`. Review and merge only after all
-   required checks pass. Cloudflare then creates the production deployment.
+When displayed settings and executed commands differ, inspect the existing
+branch trigger through the [Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/).
+Verify the Worker, repository, and branch filters before updating only its
+command. Do not infer the selected branch from the dashboard's Production
+breadcrumb; check the build source commit and its recorded settings.
 
-## Local reproduction
+The same branch-specific record retained the old token after the owner selected
+`med3dviewer build token` in the dashboard. Updating only its `build_token_uuid`
+to the exact registered token selected by the owner, then verifying readback,
+produced successful preview build `a5df33e2-b974-4745-aaf8-b8d5c89c8e7c` for commit
+`c5afb62055129f876a116a476b8498b68df33ff6`. No build-variable override was present.
 
-Use the same clean-install sequence as CI and Cloudflare:
+An API `10429` / HTTP 429 error after Wrangler starts is a separate rate-limit
+failure. Stop concurrent retries and honor `Retry-After` where available. See
+[Cloudflare API limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/).
+
+## Verified preview on 2026-10-26
+
+The [PR #10 branch preview](https://codex-review-beta-branch-for-conflicts-and-bugs-ntec3dpo-m3dv.x-panda.workers.dev)
+successfully deployed using the corrected native command and the owner-selected
+`med3dviewer build token`. The initial successful upload was build
+`a5df33e2-b974-4745-aaf8-b8d5c89c8e7c` at commit `c5afb620`. A subsequent ordinary
+Git push at commit `e00613be` passed both GitHub CI and Cloudflare build
+`a63bb0dd-07e5-4e89-afc5-1d7b1f2ab979`, without an API-triggered build.
+
+Live checks confirmed successful responses and expected content types for HTML,
+hashed JavaScript/CSS, icons, manifest, registration script, and service worker.
+A browser navigation received the SPA fallback; a missing JavaScript asset
+returned HTTP 404. Chromium loaded the external 3D
+engine, imported a synthetic STL through Browse Files, reached the ready state,
+and accepted camera shortcuts with no JavaScript page errors. A fresh mobile
+viewport also initialized successfully. Physical-device performance and full
+planning workflows remain manual acceptance checks.
+
+The temporary API repair workflow, helper, and repair-specific tests have been
+removed. Native Cloudflare Git integration now handles previews. The owner can
+delete the temporary `CF_BUILDS_REPAIR_TOKEN` GitHub Actions secret and revoke the
+`Med3DViewer temporary preview repair` Cloudflare profile token. Keep the working
+`med3dviewer build token` selected for deployment.
+
+## Acceptance: run a new non-production build
+
+1. Save those settings, then start a build for the updated PR #10 branch. Verify
+   the logged commit SHA includes this repair; `main` and `beta` do not yet contain
+   it. Do not test with a production deployment.
+2. Confirm installation, build, artifact validation, and `wrangler preview`
+   succeed. The build must report `ntec3dpo-m3dv` and a Preview URL. Use the URL
+   printed in the log or dashboard, rather than assuming a Pages-style hostname.
+3. Open the Preview URL on desktop and mobile. Check HTML, hashed JS/CSS, icons,
+   manifest, and service-worker files return successful responses and appropriate
+   content types. Missing JavaScript must not silently return HTML. Check browser
+   console errors for the external 3D engine/CDN scripts and PWA registration.
+4. Test refresh, local STL/GLB import, remote model loading, cancellation, basic
+   measurement, clipping, and planning export/import. Use a fresh browser profile
+   to distinguish a new build from a cached service worker.
+5. Verify the active production deployment and production domain did not change
+   after the preview build. Record the build URL, commit SHA, and Preview URL.
+
+Local checks cannot verify Cloudflare authentication or a live Preview. The repair
+is operationally complete only after this dashboard acceptance passes.
+
+## Local and CI validation
+
+Use Node 22 and npm 10.9.2 with the checked-in lockfile:
 
 ```bash
-rm -rf node_modules dist
-node scripts/validate-manifests.mjs
+npm run check:manifests
 npm ci
 npm run lint
 npm test
 npm run build:cloudflare
+npm run check:cloudflare
 npm run preview -- --host 127.0.0.1
 ```
 
-Open the URL printed by Vite and verify that direct navigation, asset loading,
-PWA registration, and model import work. A large-bundle warning is advisory; a
-nonzero command exit is a deployment blocker.
+`check:cloudflare` validates packaging without uploading. The npm command
+`preview` starts Vite locally; `preview:cloudflare` publishes a Worker Preview and
+requires Cloudflare authorization. `deploy:cloudflare` changes production and
+must not be used as a local check.
+
+GitHub Actions needs only repository read permission. No Cloudflare API token is
+needed in GitHub secrets for native Git integration. Require the GitHub build
+check and Cloudflare preview before merging into `beta`; release through a
+reviewed PR from `beta` into `main`.
 
 ## Troubleshooting and rollback
 
-- **`EJSONPARSE`**: run `node scripts/validate-manifests.mjs` and inspect the
-  exact line reported. If Cloudflare still shows the old malformed line 45,
-  verify that its deployment commit includes this fix and that the Pages project
-  is connected to the intended repository and branch.
-- **`npm ci` says the lock is out of sync**: use the pinned Node major, run
-  `npm install` intentionally, review both manifest and lockfile, then commit
-  them together. Do not have automation push an unreviewed lockfile.
-- **Cloudflare builds the wrong code or no preview appears**: verify repository
-  access in the Cloudflare GitHub App, the connected repository, branch controls,
-  and that the commit message does not contain a Cloudflare CI-skip marker.
-- **Worker entry-point error**: make sure only `wrangler.toml` exists and that it
-  contains `pages_build_output_dir`; this static app must not have a `main`
-  Worker entry point.
-- **Successful build but a blank site**: inspect browser console/network errors,
-  confirm Cloudflare publishes `dist`, and verify that hashed files under
-  `dist/assets` return HTTP 200.
-- **Rollback**: in **Workers & Pages > med3dviewer > Deployments**, select the
-  last known-good production deployment and choose **Rollback**. Then revert the
-  faulty Git commit so the next automatic deployment does not reintroduce it.
+- **Pages warning or missing assets:** confirm the build uses this commit, the
+  repository root, `wrangler.jsonc`, and the npm commands above. Do not add a fake
+  `src/index.ts` entry point to a static app.
+- **`Unknown argument: preview:cloudflare`:** the build log is executing
+  `npx wrangler preview:cloudflare`, which treats an npm script name as a Wrangler
+  command. If the dashboard shows an npm script but the log still shows this
+  command, replace the entire Previews Base Preview command with
+  `npx wrangler preview --config ./wrangler.jsonc`. Save and use a fresh build.
+  Confirm the command in the new log; the cause of a saved-setting/log mismatch
+  cannot be determined from the GitHub check alone.
+- **Unknown preview command / unsupported engine:** ensure `npm ci` installs the
+  pinned Wrangler, and Cloudflare uses Node 22 rather than the previous Node 20.
+- **No preview build:** check repository access for the Cloudflare GitHub App,
+  branch controls, and CI-skip markers in the commit message.
+- **Manifest/lock drift:** update the manifest and lock together with the pinned
+  toolchain and commit both. Do not automate unreviewed lockfile pushes.
+- **Blank page after upload:** check asset responses and external Three.js/Online
+  3D Viewer scripts. A successful build does not guarantee CDN availability.
+- **Rollback:** previews do not replace production. If a later production release
+  fails, restore the last known-good deployment in this Worker's dashboard, then
+  revert the faulty Git change before the next production build.
+
+Official references: [Worker Previews setup](https://developers.cloudflare.com/workers/previews/get-started/),
+[Preview configuration](https://developers.cloudflare.com/workers/previews/configuration/),
+[Workers Builds settings](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/).

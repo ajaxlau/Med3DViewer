@@ -5,15 +5,19 @@
   "type": "module",
   "packageManager": "npm@10.9.2",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:cloudflare": "npm run build",
+    "build:cloudflare": "npm run check:manifests && npm run build && npm run check:dist",
+    "deploy:cloudflare": "npm run check:dist && wrangler deploy --config ./wrangler.jsonc --assets ./dist",
+    "preview:cloudflare": "npm run check:dist && wrangler preview --config ./wrangler.jsonc",
+    "check:cloudflare": "npm run check:dist && wrangler deploy --config ./wrangler.jsonc --assets ./dist --dry-run",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "check:manifests": "node scripts/validate-manifests.mjs",
+    "check:dist": "node scripts/validate-dist.mjs",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },
@@ -42,6 +46,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "wrangler": "4.135.0"
   }
 }
