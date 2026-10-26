@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  assertPreviewTrigger, repairPreviewTrigger, cloudflareApi,
+  assertPreviewTrigger, repairPreviewTrigger, cloudflareApi, buildLogLines,
   BAD_COMMAND, PREVIEW_COMMAND, PREVIEW_BRANCH, FAILED_BUILD_ID,
 } from '../scripts/repair-cloudflare-preview.mjs';
 
@@ -103,4 +103,15 @@ test('API errors redact the credential and missing credentials fail before reque
   const token = 'test-credential-never-print';
   const api = cloudflareApi(token, async () => ({ ok: false, status: 403, json: async () => ({ success: false, errors: [{ code: 10000, message: `Refused ${token}` }] }) }));
   await assert.rejects(api('GET', '/builds/builds/example'), error => error.message.includes('[REDACTED]') && !error.message.includes(token));
+});
+
+test('Cloudflare timestamp/message tuples preserve actual build errors', () => {
+  assert.deepEqual(buildLogLines({ lines: [
+    [1700000000, 'Executing user deploy command: npx wrangler preview'],
+    [1700000001, '[ERROR] Authentication failed'],
+    'plain message', { line: 'object message' }, null, [1700000002],
+  ] }), [
+    'Executing user deploy command: npx wrangler preview',
+    '[ERROR] Authentication failed', 'plain message', 'object message',
+  ]);
 });

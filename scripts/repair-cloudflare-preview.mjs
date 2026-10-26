@@ -111,6 +111,16 @@ export function cloudflareApi(token, fetcher = fetch) {
   };
 }
 
+export function buildLogLines(logs) {
+  return (logs.lines ?? []).flatMap(entry => {
+    // Builds API log entries are [epoch timestamp, message] tuples.
+    if (Array.isArray(entry)) return entry.filter(part => typeof part === 'string');
+    if (typeof entry === 'string') return [entry];
+    const text = entry?.line ?? entry?.message ?? entry?.text;
+    return typeof text === 'string' ? [text] : [];
+  });
+}
+
 async function waitForBuild(api, buildUuid, report) {
   const deadline = Date.now() + 5 * 60_000;
   while (Date.now() < deadline) {
@@ -118,10 +128,22 @@ async function waitForBuild(api, buildUuid, report) {
     if (build.status === 'stopped') {
       report({ build_uuid: buildUuid, outcome: build.build_outcome, preview_url: build.preview_url, executed_command: build.build_trigger_metadata?.deploy_command });
       if (build.build_outcome !== 'success') {
-        const logs = await api('GET', `/builds/builds/${buildUuid}/logs`);
-        for (const entry of logs.lines ?? []) {
-          const line = typeof entry === 'string' ? entry : entry.line ?? entry.message ?? entry.text ?? '';
-          if (/Executing user|\[ERROR\]|Authentication|Invalid access|Missing |Unknown argument/i.test(line)) report({ build_log: line });
+        const lines = [];
+        let cursor = '';
+        for (let page = 0; page < 20; page++) {
+          const logs = await api('GET', `/builds/builds/${buildUuid}/logs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+          lines.push(...buildLogLines(logs));
+          if (!logs.truncated || !logs.cursor || logs.cursor === cursor) break;
+          cursor = logs.cursor;
+        }
+        const selected = new Set();
+        lines.forEach((line, index) => {
+          if (/Executing user|\[ERROR\]|Authentication|Invalid access|Missing |Unknown argument|Error:/i.test(line)) {
+            for (let i = index; i <= Math.min(index + 8, lines.length - 1); i++) selected.add(i);
+          }
+        });
+        for (const index of [...selected].sort((a, b) => a - b).slice(0, 100)) {
+          report({ build_log: lines[index] });
         }
         throw new Error(`Preview build ${buildUuid} finished with outcome ${build.build_outcome}.`);
       }
