@@ -45,7 +45,9 @@ print environment variables or credential values.
 It permits a write only when exactly one active trigger matches all of:
 
 - the same Worker and `ajaxlau/Med3DViewer` repository;
-- branch includes exactly `["*"]` and excludes exactly `["main"]`;
+- either branch includes exactly `["*"]` and excludes exactly `["main"]`, or
+  includes only the exact PR #10 feature branch with no exclusion (or only `main`
+  excluded); both forms cannot match `main`;
 - repository root and expected `npm run build:cloudflare` build command;
 - the exact bad command, or the already-correct native command.
 
@@ -54,6 +56,12 @@ The PATCH body changes only `deploy_command` to
 production configuration, tokens, variables, domains, or Worker code. A successful
 API readback is required before starting a build of the PR #10 branch and the
 workflow's exact commit. An already-correct trigger is a no-op.
+
+The first authenticated inspection found a dedicated trigger named after the
+PR #10 branch, including only that branch, with the old invalid command. This
+explains why the all-branches-only guard stopped before writing. The guard now
+also recognizes this narrower, exact feature-branch filter; it still rejects
+`main`, unexcluded wildcard filters, other branches, and mixed branch lists.
 
 If trigger identity, filters, or commands differ, the job fails without a write
 and prints the non-secret summaries for review. Do not loosen these checks merely

@@ -20,8 +20,16 @@ export function assertPreviewTrigger(trigger, workerTag) {
   assert(trigger && !trigger.deleted_on, 'Trigger is missing or deleted.');
   assert(trigger.external_script_id === workerTag, 'Worker tag mismatch.');
   assert(isRepo(trigger.repo_connection?.provider_account_name, trigger.repo_connection?.repo_name), 'Repository mismatch or missing repository identity.');
-  assert(trigger.branch_includes?.length === 1 && trigger.branch_includes[0] === '*', 'Expected the all-branches preview include filter.');
-  assert(trigger.branch_excludes?.length === 1 && trigger.branch_excludes[0] === 'main', 'Refusing to modify a trigger that does not exclusively exclude main.');
+  const includes = trigger.branch_includes;
+  const excludes = trigger.branch_excludes;
+  const allPreviews = includes?.length === 1 && includes[0] === '*'
+    && excludes?.length === 1 && excludes[0] === 'main';
+  // The API exposed a dedicated trigger for this exact feature branch. It also
+  // cannot match main, even though it does not need an explicit main exclusion.
+  const exactPreview = includes?.length === 1 && includes[0] === PREVIEW_BRANCH
+    && Array.isArray(excludes) && excludes.length <= 1
+    && excludes.every(branch => branch === 'main');
+  assert(allPreviews || exactPreview, 'Refusing production-capable or unexpected branch filters.');
   assert(trigger.build_command === BUILD_COMMAND, 'Unexpected build command.');
   assert(['/', '', '.'].includes(trigger.root_directory), 'Unexpected repository root.');
   assert([BAD_COMMAND, PREVIEW_COMMAND].includes(trigger.deploy_command), 'Unexpected deployment command; refusing to replace it.');

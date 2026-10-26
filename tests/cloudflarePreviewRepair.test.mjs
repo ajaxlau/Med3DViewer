@@ -55,6 +55,18 @@ test('wrong repository, Worker, root, or unknown command are rejected', () => {
   ]) assert.throws(() => assertPreviewTrigger(modified, tag));
 });
 
+test('the API-confirmed exact PR #10 branch trigger is safe without a main exclusion', async () => {
+  const initial = { ...trigger(), branch_includes: [PREVIEW_BRANCH], branch_excludes: [] };
+  const mock = fakeApi({ initial });
+  await repairPreviewTrigger({ api: mock.api, apply: true });
+  assert.deepEqual(mock.calls.filter(c => c.method === 'PATCH'), [{
+    method: 'PATCH', resource: `/builds/triggers/${uuid}`,
+    body: { deploy_command: PREVIEW_COMMAND },
+  }]);
+  assert.throws(() => assertPreviewTrigger({ ...initial, branch_includes: ['another-feature'] }, tag));
+  assert.throws(() => assertPreviewTrigger({ ...initial, branch_includes: [PREVIEW_BRANCH, 'main'] }, tag));
+});
+
 test('inspection is read-only by default', async () => {
   const mock = fakeApi();
   const result = await repairPreviewTrigger({ api: mock.api });
