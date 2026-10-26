@@ -52,10 +52,12 @@ Keep development dependencies installed during the build so Vite, TypeScript,
 and the pinned Wrangler CLI are available. No application runtime secrets or
 bindings are needed in Production or Previews Base for this static app.
 
-Use the existing valid Workers Builds API-token selection. The supplied log does
-not establish an authentication failure. Only if a later build reports an invalid
-token or an authorization error, verify access to the correct account/Worker and
-replace an invalid token through the dashboard API-token selector. Never paste
+The owner-selected `med3dviewer build token` successfully uploaded a preview on
+2026-10-26. The two previously bound deployment-token references returned
+`Invalid access token [9109]`. If authentication fails again, verify the token
+reference on the actual branch trigger, access to the correct account/Worker,
+and validity of its credential. Replace an invalid token through the dashboard
+API-token selector. Never paste
 token values into chat, source, or browser-exposed `VITE_*` variables.
 
 ## Existing branch trigger commands
@@ -72,6 +74,12 @@ branch trigger through the [Builds API](https://developers.cloudflare.com/worker
 Verify the Worker, repository, and branch filters before updating only its
 command. Do not infer the selected branch from the dashboard's Production
 breadcrumb; check the build source commit and its recorded settings.
+
+The same branch-specific record retained the old token after the owner selected
+`med3dviewer build token` in the dashboard. Updating only its `build_token_uuid`
+to the exact registered token selected by the owner, then verifying readback,
+produced successful preview build `a5df33e2-b974-4745-aaf8-b8d5c89c8e7c` for commit
+`c5afb62055129f876a116a476b8498b68df33ff6`. No build-variable override was present.
 
 An API `10429` / HTTP 429 error after Wrangler starts is a separate rate-limit
 failure. Stop concurrent retries and honor `Retry-After` where available. See

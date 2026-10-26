@@ -95,6 +95,11 @@ explicit `--use-med3dviewer-token` mode binds only this guarded preview trigger
 to the exact API-confirmed token UUID and name, verifies readback, then starts
 one preview build. Unknown token bindings are rejected. Production is unchanged.
 
+Build `a5df33e2-b974-4745-aaf8-b8d5c89c8e7c` succeeded for commit `c5afb620` after
+that reference correction. The workflow is now read-only again: it extracts only
+public `workers.dev` URLs from that successful build's logs while the normal Git
+integration verifies a fresh push with the retained configuration.
+
 ## Validation and cleanup
 
 Run `node --test tests/cloudflarePreviewRepair.test.mjs` to test the safeguards
