@@ -37,10 +37,15 @@ Worker and domains; do not create a replacement Worker or a Pages project.
 | Production branch | `main` |
 | Build command | `npm run build:cloudflare` |
 | Deploy command | `npm run deploy:cloudflare` |
-| Preview command | `npm run preview:cloudflare` |
+| Preview command (Previews Base) | `npx wrangler preview --config ./wrangler.jsonc` |
 | Preview builds | Enabled for all non-production branches, including `beta` and feature branches |
 | Build variable | `NODE_VERSION=22` (replace the old value of `20`) |
 | Preview model | Worker Previews (already enabled by the owner) |
+
+Set the Preview command under **Builds > Previews Base**. Keep the production
+Deploy command under **Builds > Production**. The dashboard preview command uses
+Wrangler directly; `preview:cloudflare` remains an npm script for local use.
+The build command already runs artifact validation before the preview upload.
 
 Workers Builds has no output-directory field: `./dist` is declared in source.
 Keep development dependencies installed during the build so Vite, TypeScript,
@@ -103,6 +108,13 @@ reviewed PR from `beta` into `main`.
 - **Pages warning or missing assets:** confirm the build uses this commit, the
   repository root, `wrangler.jsonc`, and the npm commands above. Do not add a fake
   `src/index.ts` entry point to a static app.
+- **`Unknown argument: preview:cloudflare`:** the build log is executing
+  `npx wrangler preview:cloudflare`, which treats an npm script name as a Wrangler
+  command. If the dashboard shows an npm script but the log still shows this
+  command, replace the entire Previews Base Preview command with
+  `npx wrangler preview --config ./wrangler.jsonc`. Save and use a fresh build.
+  Confirm the command in the new log; the cause of a saved-setting/log mismatch
+  cannot be determined from the GitHub check alone.
 - **Unknown preview command / unsupported engine:** ensure `npm ci` installs the
   pinned Wrangler, and Cloudflare uses Node 22 rather than the previous Node 20.
 - **No preview build:** check repository access for the Cloudflare GitHub App,

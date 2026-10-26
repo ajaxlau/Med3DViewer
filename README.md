@@ -132,7 +132,7 @@ Configure the Worker with:
 | Preview branches | All non-production branches (including `beta`) |
 | Node.js version | `22` (also pinned by `.node-version`; required by Wrangler) |
 | Deploy command | `npm run deploy:cloudflare` |
-| Preview command | `npm run preview:cloudflare` |
+| Preview command (Previews Base) | `npx wrangler preview --config ./wrangler.jsonc` |
 | API token | Keep a valid Workers Builds token; replace only on authentication failure |
 
 This Worker has already switched to **Worker Previews**. Enable preview builds
@@ -143,7 +143,8 @@ Cloudflare's clean install can complete. The Worker build requires no dashboard
 output-directory field: Wrangler uploads `dist` according to the checked-in
 configuration.
 
-Both scripts select `wrangler.jsonc` explicitly, and the production deploy script
+The preview command and production deploy script select `wrangler.jsonc`
+explicitly, and the production deploy script
 also passes `--assets ./dist`. This prevents the
 “Missing entry-point to Worker script or to assets directory” failure even when
 Wrangler does not auto-discover the configuration file.
