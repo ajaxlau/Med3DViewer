@@ -29,12 +29,22 @@ export async function repairBeta({ api, apply = false, startBuild = false, commi
   assert(['Med3DViewer', 'ajaxlau/Med3DViewer'].includes(metadata.repo_name));
   const tag = reference.trigger?.external_script_id;
   assert(/^[a-f0-9-]{32,36}$/i.test(tag ?? ''), 'Missing Worker identity.');
+  const describe = t => ({ trigger_uuid: t?.trigger_uuid, worker_tag: t?.external_script_id,
+    branch_includes: t?.branch_includes, branch_excludes: t?.branch_excludes,
+    repository: t?.repo_connection?.repo_name, owner: t?.repo_connection?.provider_account_name,
+    root_directory: t?.root_directory, build_command: t?.build_command,
+    deploy_command: t?.deploy_command, build_token_uuid: t?.build_token_uuid,
+    deleted: Boolean(t?.deleted_on) });
+  report({ reference_beta_trigger: describe(reference.trigger) });
   const listPath = `/builds/workers/${encodeURIComponent(tag)}/triggers`;
   const select = async () => {
     const triggers = await api('GET', listPath);
     assert(Array.isArray(triggers));
     const matches = triggers.filter(t => {
-      try { validateBeta(t, tag); return true; } catch { return false; }
+      try { validateBeta(t, tag); return true; } catch (error) {
+        report({ unmatched_trigger: describe(t), validation_error: error.message });
+        return false;
+      }
     });
     assert.equal(matches.length, 1, 'Expected exactly one beta-only trigger.');
     return matches[0];
