@@ -1,65 +1,49 @@
-name: Repair beta preview credential
+name: Verify beta preview
 on:
   push:
     branches: [beta]
     paths:
       - .github/workflows/repair-beta-build.yml
-      - scripts/repair-beta-build.mjs
-      - tests/betaBuildRepair.test.mjs
 permissions:
   contents: read
-concurrency:
-  group: beta-preview-credential-repair
-  cancel-in-progress: false
 jobs:
-  repair:
-    if: github.repository == 'ajaxlau/Med3DViewer' && github.ref == 'refs/heads/beta'
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test beta-only repair safeguards
-        run: node --test tests/betaBuildRepair.test.mjs
-      - name: Retry beta once after cancelling only its known queued repair builds
-        env:
-          CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
+      - name: Read public beta assets without deployment credentials
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import { apiClient, repairBeta, cancelQueuedBetaBuild, monitor } from './scripts/repair-beta-build.mjs';
-          assert.equal(process.env.GITHUB_REF_NAME, 'beta');
-          const token = process.env.CF_BUILDS_REPAIR_TOKEN;
-          const api = apiClient(token);
-          const report = data => console.log(JSON.stringify(data).split(token).join('[REDACTED]'));
-          await repairBeta({ api, report });
-          const limits = await api('GET', '/builds/account/limits');
-          assert.equal(limits.has_reached_build_minutes_limit, false, 'The account has reached its build-minute limit.');
-          const recent = await api('GET', '/builds/workers/24ad5277946e482fa74593ac733fddc3/builds?per_page=30');
-          assert(Array.isArray(recent));
-          const allowedCommits = [
-            '2e3940a7b98c2788b364dafe3b02dcf821555817',
-            'edde10a3c64ed82aaea0904c347ba5b49d47ef53',
-            'eed5a8a3bd972390212e348ef529deb754a37b0f',
-            '87166f68a021195d4a74a809ee3167c52dbd0793',
-            'cba704bad236919f5c238b203a33201b0b547e57',
-            process.env.GITHUB_SHA,
-          ];
-          let watchId = recent.find(b => ['running', 'initializing'].includes(b.status)
-            && b.build_trigger_metadata?.branch === 'beta'
-            && b.build_trigger_metadata?.commit_hash === process.env.GITHUB_SHA)?.build_uuid;
-          if (!watchId) {
-            const candidates = recent.filter(b => b.status === 'queued'
-              && b.build_trigger_metadata?.branch === 'beta'
-              && allowedCommits.includes(b.build_trigger_metadata?.commit_hash));
-            assert(candidates.length <= 10, 'Unexpected queued-build count.');
-            for (const build of candidates) {
-              if (await cancelQueuedBetaBuild(api, build.build_uuid, allowedCommits)) report({ cancelled_queued_beta_build: build.build_uuid });
-            }
-            const result = await repairBeta({ api, apply: true, startBuild: true, commitSha: process.env.GITHUB_SHA, report });
-            watchId = result.buildUuid;
-          }
-          await monitor(api, watchId, report);
+          const base = new URL('https://beta-ntec3dpo-m3dv.x-panda.workers.dev/');
+          const get = async path => {
+            const url = new URL(path, base);
+            assert.equal(url.origin, base.origin);
+            const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(30000) });
+            assert.equal(response.status, 200, url.pathname);
+            const type = response.headers.get('content-type') || '';
+            if (url.pathname === '/') assert(/text\/html/i.test(type), 'HTML content type');
+            if (/\.(png|ico)$/i.test(url.pathname)) assert(/image\//i.test(type), url.pathname);
+            if (url.pathname.endsWith('.js')) assert(/javascript/i.test(type), url.pathname);
+            if (url.pathname.endsWith('.css')) assert(/text\/css/i.test(type), url.pathname);
+            const data = await response.text();
+            console.log(JSON.stringify({ path: url.pathname, status: response.status, type }));
+            return data;
+          };
+          const html = await get('/');
+          assert(html.includes('Medical 3D Viewer'), 'Expected app HTML.');
+          const refs = [...html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)=["']([^"']+)["']/gi)]
+            .map(match => match[1]).filter(path => !/^(https?:)?\/\//i.test(path));
+          const paths = [...new Set([...refs, '/sw.js', '/registerSW.js', '/manifest.webmanifest'])];
+          const resources = await Promise.allSettled(paths.map(get));
+          for (const result of resources) if (result.status === 'rejected') throw result.reason;
+          const manifest = JSON.parse(resources[paths.indexOf('/manifest.webmanifest')].value);
+          const icons = await Promise.allSettled(manifest.icons.map(icon => get(icon.src)));
+          for (const result of icons) if (result.status === 'rejected') throw result.reason;
+          const missing = await fetch(new URL('/assets/missing-verification-script.js', base), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(30000) });
+          assert.equal(missing.status, 404, 'Missing JavaScript must return 404.');
+          console.log(JSON.stringify({ preview_url: base.href, public_asset_smoke: 'pass' }));
           NODE
