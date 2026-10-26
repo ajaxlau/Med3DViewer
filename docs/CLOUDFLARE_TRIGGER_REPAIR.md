@@ -51,9 +51,9 @@ It permits a write only when exactly one active trigger matches all of:
 - repository root and expected `npm run build:cloudflare` build command;
 - the exact bad command, or the already-correct native command.
 
-The PATCH body changes only `deploy_command` to
+The initial PATCH changes only `deploy_command` to
 `npx wrangler preview --config ./wrangler.jsonc`. It does not alter branch rules,
-production configuration, tokens, variables, domains, or Worker code. A successful
+production configuration, variables, domains, or Worker code. A successful
 API readback is required before starting a build of the PR #10 branch and the
 workflow's exact commit. An already-correct trigger is a no-op.
 
@@ -72,19 +72,26 @@ The job can monitor the explicitly selected preview trigger, report its actual
 command and Preview URL, and print selected error lines on failure. GitHub logs
 can then be read by the agent without more phone screenshots.
 
-After the command correction, the deployment identity returned `Invalid access
-token [code: 9109]`. The workflow is now temporarily in read-only
-`--inspect-tokens` mode. It lists build-token names and UUIDs, including the
-selected trigger's token UUID, without credential values or any configuration
-write. The owner must create a replacement deployment token in Cloudflare; the
-GitHub repair token is separate and is already working.
+After the command correction and a rate-limit cooldown, the deployment identity
+returned `Invalid access token [code: 9109]`. Read-only `--inspect-tokens` mode
+found the branch still referencing the generic `Workers Builds - 2026-10-05 21:31`
+token, while a registered user token named `ntec3dpo-m3dv build token` was available.
+The GitHub repair token is separate and is already working.
+
+The workflow's explicit `--use-worker-token` mode can replace only that identified
+stale token reference with the existing Worker-specific reference. It verifies
+the replacement's exact UUID, exact name, and user ownership through the API,
+checks the old binding against the two known UUIDs, and verifies readback before
+uploading. It never retrieves, creates, modifies, or revokes credential values;
+the PATCH changes only the guarded preview trigger's `build_token_uuid` field.
 
 ## Validation and cleanup
 
 Run `node --test tests/cloudflarePreviewRepair.test.mjs` to test the safeguards
 without credentials. Running the script locally without flags is inspection-only;
-the repair mode explicitly passes `--apply --start-build --wait`. The current
-workflow's `--inspect-tokens` mode performs only reads.
+the current repair mode explicitly passes
+`--apply --use-worker-token --start-build --wait`. `--inspect-tokens` performs only
+reads and cannot be combined with write options.
 
 After the native command is used successfully, verify a normal Git push also uses
 the corrected preview trigger and complete the app acceptance checks in

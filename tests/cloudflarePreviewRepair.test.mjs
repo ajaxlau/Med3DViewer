@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   assertPreviewTrigger, repairPreviewTrigger, cloudflareApi, buildLogLines, inspectDeploymentTokens,
   BAD_COMMAND, PREVIEW_COMMAND, PREVIEW_BRANCH, FAILED_BUILD_ID,
+  INVALID_DEPLOY_TOKEN_UUID, WORKER_DEPLOY_TOKEN_UUID,
 } from '../scripts/repair-cloudflare-preview.mjs';
 
 const tag = 'a'.repeat(32);
@@ -16,7 +17,7 @@ const trigger = () => ({
   root_directory: '/',
 });
 
-function fakeApi({ initial = trigger(), retainPatch = true } = {}) {
+function fakeApi({ initial = trigger(), retainPatch = true, tokens = [{ build_token_uuid: WORKER_DEPLOY_TOKEN_UUID, build_token_name: 'ntec3dpo-m3dv build token', owner_type: 'user' }] } = {}) {
   let stored = structuredClone(initial);
   const calls = [];
   const api = async (method, resource, body) => {
@@ -26,6 +27,7 @@ function fakeApi({ initial = trigger(), retainPatch = true } = {}) {
       trigger: { external_script_id: tag, trigger_uuid: uuid },
     };
     if (method === 'GET' && resource.endsWith('/triggers')) return [structuredClone(stored)];
+    if (method === 'GET' && resource === '/builds/tokens?per_page=200') return structuredClone(tokens);
     if (method === 'PATCH') {
       if (retainPatch) stored = { ...stored, ...body };
       return structuredClone(stored);
@@ -130,4 +132,27 @@ test('deployment token inspection is read-only and reports metadata only', async
   assert.equal(mock.calls.every(call => call.method === 'GET'), true);
   assert.equal(JSON.stringify(reports).includes('must-never-appear'), false);
   assert.deepEqual(reports.at(-1), { deployment_token: { build_token_uuid: uuid, build_token_name: 'Build token', owner_type: 'user' } });
+});
+
+test('only the identified stale token can be replaced with the registered Worker token', async () => {
+  const initial = { ...trigger(), deploy_command: PREVIEW_COMMAND, build_token_uuid: INVALID_DEPLOY_TOKEN_UUID };
+  const mock = fakeApi({ initial });
+  await repairPreviewTrigger({ api: mock.api, apply: true, useWorkerToken: true });
+  assert.deepEqual(mock.calls.filter(call => call.method === 'PATCH'), [{
+    method: 'PATCH', resource: `/builds/triggers/${uuid}`,
+    body: { build_token_uuid: WORKER_DEPLOY_TOKEN_UUID },
+  }]);
+  const unknown = fakeApi({ initial: { ...initial, build_token_uuid: uuid } });
+  await assert.rejects(repairPreviewTrigger({ api: unknown.api, apply: true, useWorkerToken: true }), /Unexpected deployment-token binding/);
+  assert.equal(unknown.calls.some(call => call.method === 'PATCH'), false);
+});
+
+test('unverified token metadata and failed token readback prevent uploads', async () => {
+  const initial = { ...trigger(), deploy_command: PREVIEW_COMMAND, build_token_uuid: INVALID_DEPLOY_TOKEN_UUID };
+  const wrongName = fakeApi({ initial, tokens: [{ build_token_uuid: WORKER_DEPLOY_TOKEN_UUID, build_token_name: 'another-worker', owner_type: 'user' }] });
+  await assert.rejects(repairPreviewTrigger({ api: wrongName.api, apply: true, useWorkerToken: true }), /not registered/);
+  assert.equal(wrongName.calls.some(call => call.method === 'PATCH'), false);
+  const notRetained = fakeApi({ initial, retainPatch: false });
+  await assert.rejects(repairPreviewTrigger({ api: notRetained.api, apply: true, useWorkerToken: true, startBuild: true, commitHash: commit }), /did not retain the Worker-specific/);
+  assert.equal(notRetained.calls.some(call => call.method === 'POST'), false);
 });

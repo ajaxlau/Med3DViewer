@@ -28,7 +28,7 @@ jobs:
           node-version: 22
       - name: Test repair safeguards without credentials
         run: node --test tests/cloudflarePreviewRepair.test.mjs
-      - name: Inspect deployment-token references without exposing credentials
+      - name: Verify the preview trigger and use its registered Worker-specific token
         env:
           CF_BUILDS_REPAIR_TOKEN: ${{ secrets.CF_BUILDS_REPAIR_TOKEN }}
-        run: node scripts/repair-cloudflare-preview.mjs --inspect-tokens
+        run: node scripts/repair-cloudflare-preview.mjs --apply --use-worker-token --start-build --wait
