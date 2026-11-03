@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
 import { ViewerManager, FlyThroughState, SplineClippingState } from '../lib/ViewerManager';
+import { createIdleLoadState, ModelLoadState } from '../lib/modelLoading';
 
 export interface MeshInfo {
   id: number;
@@ -14,6 +15,10 @@ interface ViewerContextState {
   setTheme: (theme: 'light' | 'dark') => void;
   status: string;
   loadingProgress: number;
+  modelLoadState: ModelLoadState;
+  cancelModelLoad: () => void;
+  safeMode: boolean;
+  setSafeMode: (enabled: boolean) => void;
   isEmpty: boolean;
   meshes: MeshInfo[];
   filename: string | null;
@@ -113,6 +118,8 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<'light'|'dark'>('light');
   const [status, setStatus] = useState<string>('No model loaded.\nPlease open a file.');
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [modelLoadState, setModelLoadState] = useState<ModelLoadState>(() => createIdleLoadState(false));
+  const [safeMode, setSafeModeState] = useState(false);
   const [isEmpty, setIsEmpty] = useState(true);
   const [meshes, setMeshes] = useState<MeshInfo[]>([]);
   const [filename, setFilename] = useState<string | null>(null);
@@ -423,6 +430,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
           if (url !== undefined) setLoadedUrl(url);
         },
         onProgressChange: (p) => setLoadingProgress(p),
+        onModelLoadStateChange: (state) => setModelLoadState(state),
         onMeshesChange: (newMeshes) => setMeshes(newMeshes),
         onMeshHighlighted: (id) => setHighlightedMeshId(id),
         onPlanningObjectsChange: (objects) => setPlanningObjects([...objects]),
@@ -478,6 +486,13 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
     setGlobalOpacityState(val);
     if (viewerManager) viewerManager.setGlobalOpacity(val);
     setMeshes(prev => prev.map(m => ({ ...m, opacity: val })));
+  };
+
+  const cancelModelLoad = () => viewerManager?.cancelModelLoad();
+
+  const setSafeMode = (enabled: boolean) => {
+    setSafeModeState(enabled);
+    viewerManager?.setSafeMode(enabled);
   };
 
   const setIsClipping = (val: boolean) => {
@@ -564,6 +579,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
     }
     setStatus('No model loaded.\nPlease open a file.');
     setLoadingProgress(0);
+    setModelLoadState(createIdleLoadState(safeMode));
     setIsEmpty(true);
     setMeshes([]);
     setFilename(null);
@@ -622,7 +638,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
 
   return (
     <ViewerContext.Provider value={{
-      viewerManager, theme, setTheme, status, loadingProgress, isEmpty, meshes, filename, loadedUrl,
+      viewerManager, theme, setTheme, status, loadingProgress, modelLoadState, cancelModelLoad, safeMode, setSafeMode, isEmpty, meshes, filename, loadedUrl,
       globalOpacity, setGlobalOpacity, isClipping, setIsClipping,
       clipPlanes, updateClipPlane,
       isGhostingMode, setIsGhostingMode,

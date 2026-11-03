@@ -13,7 +13,7 @@ export function ViewerCanvas() {
     backgroundImage, backgroundOpacity,
     isTransformActive, transformMode, activeTransformObjectId, planningObjects,
     planningMode, setPlanningMode, resnappingAnnotationId, setResnappingAnnotationId,
-    gpuTier, isContextLost
+    gpuTier, isContextLost, modelLoadState, cancelModelLoad, safeMode, setSafeMode
   } = useViewer();
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -274,6 +274,17 @@ export function ViewerCanvas() {
         </div>
       )}
 
+      {!isEmpty && ['validating', 'downloading', 'parsing'].includes(modelLoadState.phase) && (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-white/95 dark:bg-zinc-900/95 backdrop-blur px-4 py-2 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-700 pointer-events-auto">
+          <Loader2 size={15} className="animate-spin text-blue-600" />
+          <div className="min-w-36">
+            <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">{modelLoadState.phase === 'downloading' ? 'Downloading replacement model' : 'Preparing replacement model'}</div>
+            <div className="mt-1 h-1 rounded bg-zinc-200 dark:bg-zinc-700 overflow-hidden"><div className="h-full bg-blue-600" style={{ width: `${Math.max(2, modelLoadState.progress)}%` }} /></div>
+          </div>
+          <button onClick={cancelModelLoad} className="text-xs font-bold text-red-600 hover:text-red-700">Cancel</button>
+        </div>
+      )}
+
       {/* Hardware Fallback Mode Banner */}
       {gpuTier === 'unsupported' && !fallbackBannerDismissed && (
         <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 bg-amber-600/95 text-white backdrop-blur-md px-4 py-2 rounded-lg shadow-xl text-xs font-medium border border-amber-400/40">
@@ -306,28 +317,43 @@ export function ViewerCanvas() {
       {/* Empty State / Initial Landing / Loading state */}
       {isEmpty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none z-15 bg-white dark:bg-zinc-950 p-4 sm:p-6 overflow-hidden">
-          {(status.includes('Loading') || status.includes('Parsing') || status.includes('Reading') || status.includes('Analyzing') || status.includes('Processing') || status.includes('Compiling') || status.includes('Activating') || (loadingProgress > 0 && loadingProgress < 100)) ? (
-            <div className="flex flex-col items-center justify-center max-w-sm px-6 my-auto">
+          {['validating', 'downloading', 'parsing'].includes(modelLoadState.phase) ? (
+            <div className="flex flex-col items-center justify-center max-w-md px-6 my-auto pointer-events-auto">
               <Loader2 size={40} className="animate-spin text-blue-600 dark:text-blue-400 mb-3" />
               <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-1 tracking-tight uppercase">
                 {status.replace(/\*\*/g, '')}
               </h2>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-4 font-mono">
-                {filename ? `Preparing ${filename}...` : 'Processing 3D model geometry...'}
+                {modelLoadState.filename ? `Preparing ${modelLoadState.filename}...` : 'Processing 3D model geometry...'}
               </p>
               {/* Progress Bar */}
               <div className="w-64 bg-zinc-200 dark:bg-zinc-800 rounded-full h-2 overflow-hidden mb-2 shadow-inner">
                 <div 
                   className="bg-gradient-to-r from-blue-600 to-blue-500 h-2 rounded-full transition-all duration-300 ease-out" 
-                  style={{ width: `${Math.max(5, Math.min(100, loadingProgress))}%` }}
+                  style={{ width: `${Math.max(2, Math.min(100, modelLoadState.progress || loadingProgress))}%` }}
                 ></div>
               </div>
               <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500 font-semibold">
-                {Math.round(loadingProgress || 5)}%
+                {modelLoadState.bytesTotal
+                  ? `${(modelLoadState.bytesReceived / 1048576).toFixed(1)} / ${(modelLoadState.bytesTotal / 1048576).toFixed(1)} MB`
+                  : modelLoadState.bytesReceived
+                    ? `${(modelLoadState.bytesReceived / 1048576).toFixed(1)} MB received`
+                    : `${Math.round(modelLoadState.progress || loadingProgress || 2)}%`}
               </span>
+              {modelLoadState.warning && <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">{modelLoadState.warning}</p>}
+              {modelLoadState.cancellable && (
+                <button onClick={cancelModelLoad} className="mt-4 px-4 py-2 rounded border border-zinc-300 dark:border-zinc-700 text-xs font-bold uppercase text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800">Cancel loading</button>
+              )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center max-w-xl w-full my-auto gap-4">
+              {modelLoadState.error && (
+                <div className="pointer-events-auto w-full rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 text-left">
+                  <div className="text-xs font-bold uppercase tracking-wider text-red-700 dark:text-red-400">{modelLoadState.error.code.replaceAll('_', ' ')}</div>
+                  <p className="mt-1 text-sm text-red-700 dark:text-red-300">{modelLoadState.error.message}</p>
+                  {modelLoadState.error.workaround && <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400"><strong>Try this:</strong> {modelLoadState.error.workaround}</p>}
+                </div>
+              )}
               {/* Outline Frame for Drop 3D Models Handler */}
               <div 
                 onClick={handleOpenFiles}
@@ -360,6 +386,13 @@ export function ViewerCanvas() {
               <div className="w-full pointer-events-auto text-left">
                 <GpuHardwareCard />
               </div>
+              <label className="pointer-events-auto w-full flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 px-4 py-3 text-left">
+                <span>
+                  <span className="block text-xs font-bold text-zinc-700 dark:text-zinc-300">Safe Mode</span>
+                  <span className="block text-[10px] text-zinc-500">Lower rendering resolution and stricter file-size limits for mobile or legacy devices.</span>
+                </span>
+                <input type="checkbox" checked={safeMode} onChange={event => setSafeMode(event.target.checked)} className="h-4 w-4 accent-blue-600" />
+              </label>
             </div>
           )}
         </div>
