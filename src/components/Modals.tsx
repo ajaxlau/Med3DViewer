@@ -315,7 +315,7 @@ export function Modals() {
         {activeModal === 'url' && (
           <>
             <h3 className="text-[11px] uppercase tracking-widest font-bold mb-3 text-zinc-800 dark:text-zinc-200">Load from URL</h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">Input the URL of a 3D model (CORS Support Required):</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">Enter a model URL or a Dropbox file-sharing link:</p>
             <input 
               type="text" 
               value={urlInput}

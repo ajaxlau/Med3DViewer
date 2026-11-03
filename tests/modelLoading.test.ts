@@ -24,6 +24,36 @@ test('remote URL validation accepts HTTPS and removes fragments', () => {
   assert.equal(validateRemoteModelUrl('https://models.example/model.glb#private').href, 'https://models.example/model.glb');
 });
 
+test('Dropbox SCL file links resolve to CORS-enabled content and retain their access key', () => {
+  const url = validateRemoteModelUrl('https://www.dropbox.com/scl/fi/example-id/model.3mf?rlkey=example-key&st=example-tracking&dl=0#preview');
+  assert.equal(url.hostname, 'dl.dropboxusercontent.com');
+  assert.equal(url.pathname, '/scl/fi/example-id/model.3mf');
+  assert.equal(url.searchParams.get('rlkey'), 'example-key');
+  assert.equal(url.searchParams.get('st'), 'example-tracking');
+  assert.equal(url.searchParams.has('dl'), false);
+  assert.equal(url.hash, '');
+});
+
+test('legacy Dropbox file links and download/render variants resolve to file content', () => {
+  for (const host of ['dropbox.com', 'www.dropbox.com']) {
+    for (const query of ['', '?dl=0', '?dl=1', '?raw=1', '?dl=0&raw=1']) {
+      const url = validateRemoteModelUrl(`https://${host}/s/example-id/model%20name.stl${query}`);
+      assert.equal(url.href, 'https://dl.dropboxusercontent.com/s/example-id/model%20name.stl');
+    }
+  }
+});
+
+test('Dropbox conversion leaves unrelated hosts, signed URLs, folders and existing content URLs unchanged', () => {
+  for (const original of [
+    'https://models.example/model.glb?dl=0&signature=a%2Fb%2Bc',
+    'https://www.dropbox.com.example/model.stl?dl=0',
+    'https://www.dropbox.com/scl/fo/folder-id/model.3mf?dl=0',
+    'https://www.dropbox.com/home/model.3mf?dl=0',
+    'https://www.dropbox.com:8443/s/example-id/model.stl?dl=0',
+    'https://dl.dropboxusercontent.com/scl/fi/example-id/model.3mf?rlkey=example-key&dl=1',
+  ]) assert.equal(validateRemoteModelUrl(original).href, original);
+});
+
 test('safe mode selects conservative mobile limits', () => {
   const profile = getDeviceLoadProfile(null, true);
   assert.equal(profile.name, 'mobile-safe');

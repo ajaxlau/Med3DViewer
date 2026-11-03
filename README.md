@@ -71,6 +71,9 @@ An interactive, high-performance web-based 3D Medical Model Viewer, Virtual Surg
 * **High-Resolution Snapshot Studio**: Capture clean viewport snapshots with watermarking, timestamps, custom dimensions, and transparent or solid backgrounds.
 * **Automated 360° Orbit Capture**: Generate 6-view 360° orbit snapshots at 60° increments with in-memory preview, single-click ZIP archive packaging, and direct WhatsApp sharing.
 * **Deep-Linking & URL Auto-Load**: Load remote models automatically using `#model=<URL>$camera=...` or `?url=<URL>`.
+  Dropbox file-sharing links (`/s/` and `/scl/fi/`) are converted automatically to
+  direct-content URLs, preserving access keys. Other remote hosts must allow
+  cross-origin downloads from the viewer's origin.
 * **QR Code Sharing**: Generate instant QR codes containing model references and 3D camera viewpoints for mobile and tablet consultation.
 * **Progressive Web App (PWA)**: Built with full offline PWA caching support for reliable performance in hospital networks and offline surgical suites.
 

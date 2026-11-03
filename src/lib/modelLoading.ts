@@ -113,6 +113,15 @@ export function validateRemoteModelUrl(rawUrl: string): URL {
   if (url.protocol === 'http:' && window.location.protocol === 'https:' && !localDev) {
     throw new ModelLoadException('URL_INSECURE', 'An HTTPS page cannot safely load an HTTP model.', 'Use an HTTPS model URL or download the file and open it locally.');
   }
+  // Dropbox file-sharing pages return HTML without CORS permission. Fetch the
+  // file's content host instead, preserving access keys and other query data.
+  if (url.protocol === 'https:' && !url.port
+    && ['dropbox.com', 'www.dropbox.com'].includes(url.hostname)
+    && /^\/(?:s\/[^/]+\/|scl\/fi\/[^/]+\/)/.test(url.pathname)) {
+    url.hostname = 'dl.dropboxusercontent.com';
+    url.searchParams.delete('dl');
+    url.searchParams.delete('raw');
+  }
   url.hash = '';
   return url;
 }
