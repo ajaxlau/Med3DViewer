@@ -5,6 +5,7 @@ import {
 } from "./gpuDetection";
 import { disposeHierarchy, isSafeModelUrl } from "./utils";
 import JSZip from "jszip";
+import { enforcePixelRatioLimit } from "./renderResolution";
 import {
   asLoadException,
   createIdleLoadState,
@@ -416,15 +417,15 @@ export class ViewerManager {
       (s = (u = this.viewer) == null ? void 0 : u.viewer) != null && s.renderer
     ))
       return;
-    const i = this.viewer.viewer.renderer,
-      r = this.gpuCapabilities;
+    const i = this.viewer.viewer.renderer;
     if (typeof i.setPixelRatio == "function") {
-      let c = 2;
-      (!r || r.tier === "unsupported" || r.architecture === "Legacy WebGL"
-        ? (c = 1)
-        : r.tier === "webgl2" && (c = 1.5),
-        this.forceSafeMode && (c = Math.min(c, 1)),
-        i.setPixelRatio(Math.min(window.devicePixelRatio || 1, c)));
+      enforcePixelRatioLimit(i, () => {
+        const capabilities = this.gpuCapabilities;
+        const cap = !capabilities || capabilities.tier === "unsupported" || capabilities.architecture === "Legacy WebGL"
+          ? 1 : capabilities.tier === "webgl2" ? 1.5 : 2;
+        return this.forceSafeMode ? Math.min(cap, 1) : cap;
+      });
+      i.setPixelRatio(window.devicePixelRatio || 1);
     }
     const l = i.domElement;
     l &&
