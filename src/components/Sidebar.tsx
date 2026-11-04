@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useViewer } from '../context/ViewerContext';
 import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight, Pin, PinOff } from 'lucide-react';
 import { ModelStatusCard } from './ModelStatusCard';
@@ -91,7 +91,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
     };
   }, []);
 
-  const availableCurves = (planningObjects || []).filter(o => o.type === 'curve');
+  const availableCurves = useMemo(() => (planningObjects || []).filter(o => o.type === 'curve'), [planningObjects]);
 
   useEffect(() => {
     if (availableCurves.length > 0) {
@@ -117,7 +117,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
       }}
       className={`transition-all duration-300 bg-zinc-50 dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 ${collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[280px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 flex'}`}
     >
-      <div className="flex flex-col w-full min-h-min pb-5">
+      {!collapsed && <div className="flex flex-col w-full min-h-min pb-5">
         
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
           <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-100 uppercase tracking-widest flex items-center gap-2">
@@ -813,7 +813,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
         <div className="p-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <ModelStatusCard />
         </div>
-      </div>
+      </div>}
     </aside>
   );
 }

@@ -1,3 +1,6 @@
+import type { GpuCapabilities } from './gpuDetection';
+import { getDeviceLoadProfile } from './modelLoading';
+
 interface PixelRatioRenderer {
   setPixelRatio: (ratio?: number) => void;
 }
@@ -18,4 +21,11 @@ export function enforcePixelRatioLimit(renderer: PixelRatioRenderer, getLimit: (
     ratio === undefined ? ratio : Math.min(ratio, state.getLimit())
   );
   limits.set(renderer, state);
+}
+
+// Load admission and framebuffer resolution share the same device policy. Safe
+// Mode can tighten that policy but must never raise a legacy device's cap.
+export function getRenderPixelRatioCap(capabilities: GpuCapabilities | null, safeMode = false): number {
+  const cap = getDeviceLoadProfile(capabilities, false).pixelRatioCap;
+  return safeMode ? Math.min(cap, getDeviceLoadProfile(capabilities, true).pixelRatioCap) : cap;
 }

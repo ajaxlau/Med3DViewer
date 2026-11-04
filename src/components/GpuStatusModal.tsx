@@ -51,7 +51,7 @@ export function GpuStatusModal({ onClose }: { onClose: () => void }) {
       {loading ? (
         <div className="py-8 flex flex-col items-center justify-center text-zinc-500 dark:text-zinc-400 gap-2">
           <RefreshCw className="animate-spin text-blue-600 dark:text-blue-400" size={24} />
-          <span className="text-xs">Probing hardware pipeline and shader modules...</span>
+          <span className="text-xs">Checking available graphics capabilities...</span>
         </div>
       ) : capabilities ? (
         <div className="flex flex-col gap-4">

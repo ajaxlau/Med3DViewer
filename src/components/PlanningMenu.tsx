@@ -23,6 +23,7 @@ export function PlanningMenu() {
   const [newGroupName, setNewGroupName] = useState('');
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [projectIoError, setProjectIoError] = useState('');
   
   // Analytics retractable state
   const [isToolsExpanded, setIsToolsExpanded] = useState(true);
@@ -646,6 +647,7 @@ export function PlanningMenu() {
             </div>
           </div>
 
+          {projectIoError && <p role="alert" className="px-3 py-2 text-xs text-red-700 dark:text-red-300">{projectIoError}</p>}
           {/* Expanded Project IO Grid */}
           <div 
             className={`grid transition-all duration-300 ease-in-out ${
@@ -673,10 +675,11 @@ export function PlanningMenu() {
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file && viewerManager) {
+                                    setProjectIoError('');
                                     try {
                                         await viewerManager.importPlanningObjectsZip(file);
                                     } catch (err) {
-                                        console.error("Error importing planning objects:", err);
+                                        setProjectIoError(err instanceof Error ? err.message : 'The planning project could not be imported. Check the file and try again.');
                                     }
                                 }
                                 if (fileInputRef.current) fileInputRef.current.value = '';
@@ -700,10 +703,11 @@ export function PlanningMenu() {
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file && viewerManager) {
+                                    setProjectIoError('');
                                     try {
                                         await viewerManager.importCustomPlanningModel(file);
                                     } catch (err) {
-                                        console.error("Error importing custom model STL:", err);
+                                        setProjectIoError(err instanceof Error ? err.message : 'The custom STL could not be imported. Check the file and try again.');
                                     }
                                 }
                                 if (stlInputRef.current) stlInputRef.current.value = '';

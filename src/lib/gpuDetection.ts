@@ -23,6 +23,16 @@ export interface GpuCapabilities {
 }
 
 let cachedCapabilities: GpuCapabilities | null = null;
+let pendingProbe: Promise<GpuCapabilities> | null = null;
+
+// Viewer initialization and diagnostic cards may ask together. Reuse the probe
+// instead of allocating several temporary graphics contexts at startup.
+export function detectGpuCapabilities(forceRecheck = false): Promise<GpuCapabilities> {
+  if (pendingProbe) return pendingProbe;
+  if (cachedCapabilities && !forceRecheck) return Promise.resolve(cachedCapabilities);
+  pendingProbe = probeGpuCapabilities().finally(() => { pendingProbe = null; });
+  return pendingProbe;
+}
 
 function detectMobileAndMemory(): {
   isMobile: boolean;
@@ -63,11 +73,7 @@ function checkIsSoftwareRenderer(rendererString: string): boolean {
  * Detects hardware GPU capabilities: WebGPU with fallback to WebGL2.
  * Caches result so repeated checks don't incur hardware query latency.
  */
-export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCapabilities> {
-  if (cachedCapabilities && !forceRecheck) {
-    return cachedCapabilities;
-  }
-
+async function probeGpuCapabilities(): Promise<GpuCapabilities> {
   const { isMobile, isLowMem, deviceMemoryGB, concurrency } = detectMobileAndMemory();
 
   // 1. Check for WebGPU
@@ -79,11 +85,6 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
       });
 
       if (adapter) {
-        // Request device to verify actual hardware pipeline access
-        const device = await adapter.requestDevice({
-          requiredFeatures: [],
-        });
-
         let adapterInfo: any = {};
         if ('requestAdapterInfo' in adapter) {
           try {
@@ -95,58 +96,41 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
           adapterInfo = (adapter as any).info;
         }
 
-        // Test basic WGSL compute shader compilation to ensure driver compatibility
-        const testShader = device.createShaderModule({
-          code: `
-            @compute @workgroup_size(1)
-            fn main() {}
-          `
-        });
+        // This reports adapter availability, not an active WebGPU renderer.
+        // The viewer uses WebGL, so avoid allocating a GPUDevice or compiling
+        // a dummy compute shader just to populate the diagnostic card.
+        const limits = adapter.limits;
+        const featuresList: string[] = [];
+        adapter.features.forEach(f => featuresList.push(f));
+        const adapterDesc = adapterInfo.description || adapterInfo.device || adapterInfo.vendor || 'Hardware WebGPU Device';
+        const isSoftware = checkIsSoftwareRenderer(adapterDesc);
 
-        if (testShader) {
-          const limits = device.limits;
-          const featuresList: string[] = [];
-          device.features.forEach(f => featuresList.push(f));
-          const adapterDesc = adapterInfo.description || adapterInfo.device || adapterInfo.vendor || 'Hardware WebGPU Device';
-          const isSoftware = checkIsSoftwareRenderer(adapterDesc);
+        const finalLowMem = isLowMem || isSoftware;
+        const recPixelRatio = finalLowMem ? 1.0 : Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 1.5);
+        const memoryBudget = finalLowMem ? 384 : 1024;
 
-          const finalLowMem = isLowMem || isSoftware;
-          const recPixelRatio = finalLowMem ? 1.0 : Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 1.75);
-          const memoryBudget = finalLowMem ? 384 : 1024;
+        cachedCapabilities = {
+          tier: 'webgpu',
+          adapterName: adapterDesc,
+          vendor: adapterInfo.vendor || 'WebGPU Vendor',
+          architecture: adapterInfo.architecture || 'WebGPU adapter',
+          features: featuresList,
+          maxComputeWorkgroupSizeX: limits.maxComputeWorkgroupSizeX,
+          maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+          maxBufferSize: limits.maxBufferSize,
+          isFallback: false,
+          rawInfo: adapterInfo,
+          isLowMemoryDevice: finalLowMem,
+          isMobileDevice: isMobile,
+          isSoftwareRenderer: isSoftware,
+          deviceMemoryGB,
+          hardwareConcurrency: concurrency,
+          maxTextureSize: limits.maxTextureDimension2D || 8192,
+          recommendedPixelRatio: recPixelRatio,
+          memoryBudgetMB: memoryBudget,
+        };
 
-          cachedCapabilities = {
-            tier: 'webgpu',
-            adapterName: adapterDesc,
-            vendor: adapterInfo.vendor || 'WebGPU Vendor',
-            architecture: adapterInfo.architecture || 'WebGPU Compute',
-            features: featuresList,
-            maxComputeWorkgroupSizeX: limits.maxComputeWorkgroupSizeX,
-            maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
-            maxBufferSize: limits.maxBufferSize,
-            isFallback: false,
-            rawInfo: adapterInfo,
-            isLowMemoryDevice: finalLowMem,
-            isMobileDevice: isMobile,
-            isSoftwareRenderer: isSoftware,
-            deviceMemoryGB,
-            hardwareConcurrency: concurrency,
-            maxTextureSize: limits.maxTextureDimension2D || 8192,
-            recommendedPixelRatio: recPixelRatio,
-            memoryBudgetMB: memoryBudget,
-          };
-          
-          // Clean up temporary probe device to prevent GPU resource leaks
-          try {
-            if (typeof device.destroy === 'function') {
-              device.destroy();
-            }
-          } catch (cleanErr) {}
-
-          console.log('[GPU Detect] Detected WebGPU hardware acceleration:', cachedCapabilities);
-          return cachedCapabilities;
-        } else {
-          try { device.destroy?.(); } catch (e) {}
-        }
+        return cachedCapabilities;
       }
     } catch (err: any) {
       console.warn('[GPU Detect] WebGPU initialization failed, falling back to WebGL2:', err?.message || err);
@@ -178,7 +162,7 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
         architecture: 'OpenGL ES / WebGL2 Pipeline',
         features: ['webgl2', 'float-textures', 'instanced-arrays'],
         isFallback: true,
-        fallbackReason: 'WebGPU is unavailable on this browser/OS or disabled in flags. Running on optimized WebGL2 engine.',
+        fallbackReason: 'WebGPU adapter unavailable. WebGL2 capability detected; the viewer renders with WebGL.',
         isLowMemoryDevice: finalLowMem,
         isMobileDevice: isMobile,
         isSoftwareRenderer: isSoftware,
@@ -195,7 +179,7 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
         loseExt?.loseContext();
       } catch (e) {}
 
-      console.log('[GPU Detect] Running in WebGL2 fallback mode:', cachedCapabilities);
+      // Capabilities are diagnostic data, not evidence of a compute pipeline.
       return cachedCapabilities;
     }
   } catch (e: any) {
@@ -226,7 +210,7 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
         deviceMemoryGB,
         hardwareConcurrency: concurrency,
         maxTextureSize: maxTex,
-        recommendedPixelRatio: 1.0,
+        recommendedPixelRatio: 0.75,
         memoryBudgetMB: 192,
       };
 
@@ -256,7 +240,7 @@ export async function detectGpuCapabilities(forceRecheck = false): Promise<GpuCa
     deviceMemoryGB,
     hardwareConcurrency: concurrency,
     maxTextureSize: 1024,
-    recommendedPixelRatio: 1.0,
+    recommendedPixelRatio: 0.75,
     memoryBudgetMB: 128,
   };
   return cachedCapabilities;

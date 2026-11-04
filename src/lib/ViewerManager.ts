@@ -4,8 +4,10 @@ import {
   GpuTier,
 } from "./gpuDetection";
 import { disposeHierarchy, isSafeModelUrl } from "./utils";
-import JSZip from "jszip";
-import { enforcePixelRatioLimit } from "./renderResolution";
+import { loadZip } from "./loadZip";
+import { ArchiveLimitError, readArchiveEntry } from "./archiveReading";
+import { enforcePixelRatioLimit, getRenderPixelRatioCap } from "./renderResolution";
+import { validateSharedWorkspace, normalizeSlicerCoordinateSystem, validateSlicerMarkups, validateEmbeddedPlanningAsset, validatePlanningMetadata, validatePlanningArchiveEntries, safePlanningColor, transformedDistance, transformedAngle } from "./planningData";
 import {
   asLoadException,
   createIdleLoadState,
@@ -97,6 +99,7 @@ export class ViewerManager {
       (this.defaultCamera = null),
       (this.loadedFilename = null),
       (this.loadedUrl = null),
+      (this.loadedModelIdentity = null),
       (this.modelBBox = null),
       (this.topRulerRef = null),
       (this.leftRulerRef = null),
@@ -420,10 +423,7 @@ export class ViewerManager {
     const i = this.viewer.viewer.renderer;
     if (typeof i.setPixelRatio == "function") {
       enforcePixelRatioLimit(i, () => {
-        const capabilities = this.gpuCapabilities;
-        const cap = !capabilities || capabilities.tier === "unsupported" || capabilities.architecture === "Legacy WebGL"
-          ? 1 : capabilities.tier === "webgl2" ? 1.5 : 2;
-        return this.forceSafeMode ? Math.min(cap, 1) : cap;
+        return getRenderPixelRatioCap(this.gpuCapabilities, this.forceSafeMode);
       });
       i.setPixelRatio(window.devicePixelRatio || 1);
     }
@@ -835,16 +835,8 @@ export class ViewerManager {
       console.warn("Disposal of planning items failed:", l);
     }
     ((this.planningGroups = []), this.notifyGroupsChanged());
-    try {
-      (this.loadedFilename &&
-        (localStorage.removeItem(
-          `3dpo_planning_objects_${this.loadedFilename}`,
-        ),
-        localStorage.removeItem(`3dpo_planning_groups_${this.loadedFilename}`)),
-        Object.keys(localStorage).forEach((l) => {
-          l.startsWith("3dpo_planning_") && localStorage.removeItem(l);
-        }));
-    } catch {}
+    // Model replacement only disposes the scene. Saved workspaces belong to
+    // their own model and must survive opening another model or resetting view.
     if (
       (this.revertGhostingMode(),
       this.clearHighlight(),
@@ -903,6 +895,7 @@ export class ViewerManager {
     }
     ((this.loadedFilename = null),
       (this.loadedUrl = null),
+      (this.loadedModelIdentity = null),
       this.config.onStatusChange(
         `No model loaded.
 Please open a file.`,
@@ -1047,6 +1040,7 @@ Please open a file.`,
       (window._viewerManagerInstance = null);
   }
   saveToLocalStorage() {
+    if (this.planningStorageSuspended || this.readOnlySharedWorkspace) return;
     if (this.loadedFilename)
       try {
         const i = this.planningObjects.map((r) => {
@@ -1055,7 +1049,9 @@ Please open a file.`,
             id: r.id,
             name: r.name,
             type: r.type,
+            meshMatrix: r.mesh ? (r.mesh.updateMatrixWorld(true), r.mesh.matrixWorld.toArray()) : undefined,
             color: r.color,
+            opacity: r.opacity,
             groupId: r.groupId,
             visible: r.visible !== !1,
             cardOffset: r.cardOffset
@@ -1186,36 +1182,29 @@ Please open a file.`,
         if (!l) return;
         const u = JSON.parse(l);
         if (!Array.isArray(u)) return;
+        validatePlanningMetadata({ objects: u }, getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes);
         const s = window.THREE;
         if (!s) return;
         const c = this.getModelRoot();
         for (const d of u) {
           const h = (m) => {
-            m &&
-              ((m.id = d.id),
-              (m.name = d.name),
-              (m.color = d.color),
-              (m.groupId = d.groupId),
-              (m.visible = d.visible !== !1),
-              m.mesh &&
-                (m.type !== "custom_model" &&
-                  ![
-                    "plane",
-                    "cylinder",
-                    "curve",
-                    "measurement",
-                    "angle",
-                    "point",
-                    "annotation",
-                  ].includes(m.type) &&
-                  (d.posX !== void 0 &&
-                    m.mesh.position.set(d.posX, d.posY, d.posZ),
-                  d.rotQx !== void 0 &&
-                    m.mesh.quaternion.set(d.rotQx, d.rotQy, d.rotQz, d.rotQw),
-                  d.scaleX !== void 0 &&
-                    m.mesh.scale.set(d.scaleX, d.scaleY, d.scaleZ)),
-                (m.mesh.visible = m.visible)),
-              this.updateMeshColorAndVisibility(m));
+            if (!m) return;
+            m.id = d.id; m.name = d.name; m.color = safePlanningColor(d.color);
+            m.groupId = d.groupId; m.visible = d.visible !== false; m.opacity = d.opacity;
+            if (m.mesh) {
+              if (d.meshMatrix) {
+                const transform = new s.Matrix4().fromArray(d.meshMatrix);
+                m.mesh.parent?.updateMatrixWorld?.(true);
+                if (m.mesh.parent) transform.premultiply(new s.Matrix4().copy(m.mesh.parent.matrixWorld).invert());
+                transform.decompose(m.mesh.position, m.mesh.quaternion, m.mesh.scale);
+              } else {
+                if (d.posX !== undefined) m.mesh.position.set(d.posX, d.posY, d.posZ);
+                if (d.rotQx !== undefined) m.mesh.quaternion.set(d.rotQx, d.rotQy, d.rotQz, d.rotQw);
+                if (d.scaleX !== undefined) m.mesh.scale.set(d.scaleX, d.scaleY, d.scaleZ);
+              }
+              m.mesh.visible = m.visible;
+            }
+            this.updateMeshColorAndVisibility(m);
           };
           try {
             if (d.type === "plane") {
@@ -1227,7 +1216,7 @@ Please open a file.`,
               (h(y),
                 y &&
                   d.thickness !== void 0 &&
-                  this.updatePlaneGeometry(y.id, d.extWidth || 0, d.thickness));
+                  this.updatePlaneGeometry(y.id, d.extWidth ?? 0, d.thickness, d.extLength ?? 0));
             } else if (d.type === "cylinder") {
               const m = new s.Vector3(d.p1.x, d.p1.y, d.p1.z),
                 x = new s.Vector3(d.p2.x, d.p2.y, d.p2.z);
@@ -1323,10 +1312,11 @@ Please open a file.`,
               }
             } else if (d.type === "custom_model" && d.fileDataURL)
               try {
-                const m = await fetch(d.fileDataURL);
+                const m = await fetch(validateEmbeddedPlanningAsset(d.fileDataURL, getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes));
                 if (m.ok) {
-                  const x = await m.arrayBuffer(),
-                    y = new window.THREE.STLLoader().parse(x);
+                  const x = await m.arrayBuffer();
+                  await validateLocalFiles([new File([x], 'planning.stl')], getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode));
+                  const y = new window.THREE.STLLoader().parse(x);
                   (c && window.THREE && y.applyMatrix4(c.matrixWorld),
                     y.computeBoundingBox(),
                     y.computeBoundingSphere());
@@ -1383,7 +1373,6 @@ Please open a file.`,
           } catch (m) {
             console.warn(
               "Failed to reconstruct serialized planning object",
-              d,
               m,
             );
           }
@@ -1442,6 +1431,7 @@ Please open a file.`,
     this.activeLoadController = null;
     this.activeLoadRequestId = null;
     this.loadedUrl = null;
+    this.loadedModelIdentity = null;
     this.emitModelLoadState({
       phase: failure.code === 'CANCELLED' ? 'cancelled' : 'failed',
       cancellable: false,
@@ -1452,8 +1442,10 @@ Please open a file.`,
     this.config.onProgressChange && this.config.onProgressChange(0);
     this.config.onStatusChange(failure.message, !0, null, null);
   }
-  async loadFiles(i) {
+  async loadFiles(i, options: { shared?: boolean } = {}) {
     if (!i || i.length === 0) return;
+    this.readOnlySharedWorkspace = options.shared === true;
+    this.loadedModelIdentity = null;
     this.cancelModelLoad(!0);
     const requestId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     const files = Array.from(i) as File[];
@@ -1483,6 +1475,8 @@ Please open a file.`,
     } catch (error) { this.failModelLoad(requestId, error); }
   }
   async loadUrl(i, camera) {
+    this.readOnlySharedWorkspace = false;
+    this.loadedModelIdentity = null;
     this.cancelModelLoad(!0);
     const requestId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     const controller = new AbortController();
@@ -1541,7 +1535,15 @@ Please open a file.`,
       if (requestId !== this.activeLoadRequestId) return;
       const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
       const file = new File([blob], filename, { type: blob.type });
+      chunks.length = 0; // The Blob owns its bytes; release retained download chunks.
       const validation = await validateLocalFiles([file], profile);
+      if (requestId !== this.activeLoadRequestId) return;
+      // Bind protected-share metadata to exactly the bytes actually imported.
+      // Digest before GPU allocation, and retain only the small identity string.
+      const modelIdentity = ['stl', 'glb', '3mf'].includes(getFileExtension(filename))
+        ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())))
+          .map(byte => byte.toString(16).padStart(2, '0')).join('') : null;
+      if (requestId !== this.activeLoadRequestId) return;
       if (['gltf', 'obj'].includes(getFileExtension(filename))) {
         this.emitModelLoadState({
           warning: 'Remote multi-file models may omit referenced buffers, materials, or textures. Prefer a self-contained GLB or ZIP file.'
@@ -1551,6 +1553,7 @@ Please open a file.`,
       this.activeLoadRequestId = requestId;
       this.activeLoadController = controller;
       this.loadedUrl = url.href;
+      this.loadedModelIdentity = modelIdentity;
       this.emitModelLoadState({ phase: 'parsing', progress: 75, bytesReceived: received, bytesTotal: declaredLength || received });
       this.config.onStatusChange('Parsing downloaded model...', !0, filename, url.href);
       this.config.onProgressChange && this.config.onProgressChange(75);
@@ -1651,7 +1654,7 @@ Please open a file.`,
                 }
               (this.initTransformControls(),
                 this.enforceFreeOrbit(),
-                this.loadFromLocalStorage());
+                !this.readOnlySharedWorkspace && this.loadFromLocalStorage());
             }
           } else
             m > 0
@@ -2900,7 +2903,7 @@ Please open a file.`,
       s = i.name || "Callout";
     const c = i.description ? String(i.description).trim() : "",
       f =
-        i.color ||
+        safePlanningColor(i.color) ||
         (i.type === "angle"
           ? "#d97706"
           : i.type === "measurement"
@@ -2909,35 +2912,34 @@ Please open a file.`,
     if (i.type === "measurement") {
       u = "Distance";
       const d =
-        i.baseDistance !== void 0 ? `${i.baseDistance.toFixed(2)} mm` : "";
+        i.baseDistance !== void 0 ? `${this.getPlanningMetric(i).toFixed(2)} mm` : "";
       s = i.name ? `${i.name}${d ? ` (${d})` : ""}` : d;
     } else if (i.type === "angle") {
       u = "Angle";
-      const d = i.angle !== void 0 ? `${i.angle.toFixed(1)}°` : "";
+      const d = i.angle !== void 0 ? `${this.getPlanningMetric(i).toFixed(1)}°` : "";
       s = i.name ? `${i.name}${d ? ` (${d})` : ""}` : d;
     } else
       i.type === "annotation" &&
         ((u = "3D Pin"), (s = i.text || i.name || "Annotation"));
-    ((l.style.borderTop = `2.5px solid ${f}`),
-      (l.innerHTML = `
-      <div class="flex items-center justify-between gap-2.5 pb-2 border-b border-slate-800/80">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style="background-color: ${f}"></span>
-          <span class="font-mono text-xs font-bold text-white tracking-tight truncate">${s}</span>
-        </div>
-        <span class="text-[9px] uppercase font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/60 font-semibold tracking-wider shrink-0">${u}</span>
-      </div>
-      ${
-        c
-          ? `
-        <div class="text-[11px] text-zinc-300 font-sans leading-relaxed break-words whitespace-pre-wrap py-1">
-          ${c}
-        </div>
-      `
-          : ""
-      }
-    `),
-      (l.style.display = "flex"),
+    l.style.borderTop = `2.5px solid ${f}`;
+    l.replaceChildren();
+    const header = document.createElement("div");
+    header.className = "flex items-center justify-between gap-2.5 pb-2 border-b border-slate-800/80";
+    const label = document.createElement("span");
+    label.className = "font-mono text-xs font-bold text-white tracking-tight truncate";
+    label.textContent = String(s);
+    const badge = document.createElement("span");
+    badge.className = "text-[9px] uppercase font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300";
+    badge.textContent = u;
+    header.append(label, badge);
+    l.appendChild(header);
+    if (c) {
+      const description = document.createElement("div");
+      description.className = "text-[11px] text-zinc-300 leading-relaxed break-words whitespace-pre-wrap py-1";
+      description.textContent = c;
+      l.appendChild(description);
+    }
+    ((l.style.display = "flex"),
       this.updateCardTooltipPosition(r),
       requestAnimationFrame(() => {
         var d;
@@ -3313,6 +3315,14 @@ Please open a file.`,
   updateAnnotationLeaderLine(i, r, l, u, s) {
     this.updateCardLeaderLine(i, r, l, u, s);
   }
+  getPlanningMetric(object) {
+    if (!object.mesh) return object.type === 'measurement' ? object.baseDistance : object.angle;
+    object.mesh.updateMatrixWorld(true);
+    const matrix = object.mesh.matrixWorld.toArray();
+    return object.type === 'measurement'
+      ? transformedDistance(object.baseDistance, matrix)
+      : transformedAngle(object.p1, object.p2Coord, object.p3, matrix);
+  }
   updatePlanningCardLabel(i) {
     var l, u, s, c, f, d;
     if (!i || !["annotation", "measurement", "angle"].includes(i.type)) return;
@@ -3325,6 +3335,12 @@ Please open a file.`,
       return;
     }
     if (!i.labelDiv || !window.THREE) return;
+    if (i.type === 'measurement' || i.type === 'angle') {
+      const span = i.labelDiv.querySelector(i.type === 'measurement' ? '.measurement-label-text' : '.angle-label-text');
+      const value = this.getPlanningMetric(i);
+      const formatted = i.type === 'measurement' ? `${value.toFixed(2)} mm` : `${value.toFixed(1)}°`;
+      if (span) span.textContent = i.name ? `${i.name} (${formatted})` : formatted;
+    }
     let r = null;
     if (i.type === "annotation")
       i.mesh && i.mesh.position
@@ -3497,6 +3513,10 @@ Please open a file.`,
   }
   createPlanningAngle(i: any, r: any, l: any, u: any = 0, s: any = 0) {
     if (!window.THREE || !this.viewer || !this.viewer.viewer) return;
+    if (i.distanceTo(r) < 1e-8 || l.distanceTo(r) < 1e-8) {
+      this.config.onStatusChange?.('An angle requires three distinct points. Pick another point.', false);
+      return;
+    }
     const c = this.viewer.viewer.scene || this.viewer.viewer.mainScene;
     if (!c) return;
     const f = window.THREE,
@@ -3554,6 +3574,9 @@ Please open a file.`,
       }),
       U = new f.Mesh(j, V);
     ((U.renderOrder = 999), d.add(U));
+    // Recompute from the actual three points; native Slicer Angle markups do not
+    // carry the app-specific properties.angle field.
+    u = b.angleTo(y) * (180 / Math.PI);
     const $ = `Angle_${this.nextPlanningObjectId++}`,
       q = `${u.toFixed(1)}°`,
       G = document.createElement("div");
@@ -3647,7 +3670,7 @@ Please open a file.`,
         this.config.onPlanningObjectsChange(this.planningObjects),
       this.saveToLocalStorage());
   }
-  updatePlaneGeometry(i, r, l) {
+  updatePlaneGeometry(i, r, l, extensionLength = r) {
     const u = window.THREE;
     if (!u) return;
     const s = this.planningObjects.find((w) => w.id === i);
@@ -3660,7 +3683,7 @@ Please open a file.`,
       return;
     s.mesh.geometry && s.mesh.geometry.dispose();
     const c = s.baseWidth + r,
-      f = s.baseLength + r,
+      f = s.baseLength + extensionLength,
       d = Math.abs(l),
       h = new u.BoxGeometry(c, f, d);
     (h.translate(0, 0, l / 2),
@@ -3687,7 +3710,7 @@ Please open a file.`,
       y = new u.LineSegments(x, b);
     (s.mesh.add(y),
       (s.extWidth = r),
-      (s.extLength = r),
+      (s.extLength = extensionLength),
       (s.width = c),
       (s.height = f),
       (s.thickness = l),
@@ -3844,6 +3867,23 @@ Please open a file.`,
   getCurves() {
     return (this.planningObjects || []).filter((i) => i.type === "curve");
   }
+  getWorldCurvePath(object) {
+    const T = window.THREE;
+    if (!T || !object?.curvePath || !object.mesh) return object?.curvePath;
+    object.mesh.updateMatrixWorld(true);
+    const matrix = object.mesh.matrixWorld;
+    const key = matrix.elements.join(',');
+    if (object.worldCurveCache?.source === object.curvePath && object.worldCurveCache.key === key) return object.worldCurveCache.path;
+    const transform = matrix.clone(), source = object.curvePath;
+    // Transform the original interpolated curve rather than rebuilding it from
+    // transformed control points (centripetal interpolation changes under a
+    // nonuniform scale). The wrapper computes arc length in world coordinates.
+    const path = new T.Curve();
+    path.getPoint = (t, target = new T.Vector3()) => target.copy(source.getPoint(t)).applyMatrix4(transform);
+    path.getTangent = (t, target = new T.Vector3()) => target.copy(source.getTangent(t)).transformDirection(transform);
+    object.worldCurveCache = { source, key, path };
+    return path;
+  }
   startFlyThrough(i, r = !1) {
     var f, d, h, m, x, b, y, w, C, k, z, _, N;
     if (
@@ -3907,7 +3947,7 @@ Please open a file.`,
           O.updateProjectionMatrix();
         } catch {}
     }
-    const c = u.curvePath.getLength() || u.baseDistance || 100;
+    const c = this.getWorldCurvePath(u).getLength() || u.baseDistance || 100;
     return (
       (this.flyThroughState = {
         ...this.flyThroughState,
@@ -4066,7 +4106,7 @@ Please open a file.`,
     );
     if (!i || !i.curvePath) return;
     const r = window.THREE,
-      l = i.curvePath,
+      l = this.getWorldCurvePath(i),
       u = Math.max(1e-4, Math.min(0.9999, this.flyThroughState.progress)),
       s = l.getPointAt(u),
       c = l.getTangentAt(u).normalize(),
@@ -4157,7 +4197,7 @@ Please open a file.`,
           : d.navigation) != null &&
         h.GetCamera &&
         (this.preSplineClipCamera = this.viewer.viewer.navigation.GetCamera()));
-    const u = l.curvePath.getLength();
+    const u = this.getWorldCurvePath(l).getLength();
     return (
       (this.splineClippingState.active = !0),
       (this.splineClippingState.curveId = l.id),
@@ -4291,7 +4331,7 @@ Please open a file.`,
     let c = null;
     s &&
       s.curvePath &&
-      (c = s.curvePath.getPointAt(this.splineClippingState.progress));
+      (c = this.getWorldCurvePath(s).getPointAt(this.splineClippingState.progress));
     let f = 1;
     i === "in"
       ? (f = 0.8)
@@ -4354,7 +4394,7 @@ Please open a file.`,
     let c = null;
     s &&
       s.curvePath &&
-      (c = s.curvePath.getPointAt(this.splineClippingState.progress));
+      (c = this.getWorldCurvePath(s).getPointAt(this.splineClippingState.progress));
     const f = c
         ? new l.Vector3(c.x, c.y, c.z)
         : new l.Vector3(u.center.x, u.center.y, u.center.z),
@@ -4408,7 +4448,7 @@ Please open a file.`,
         1e-4,
         Math.min(0.9999, this.splineClippingState.progress),
       ),
-      s = l.curvePath.getPointAt(u),
+      s = this.getWorldCurvePath(l).getPointAt(u),
       c = typeof i.GetCamera == "function" ? i.GetCamera() : null;
     if (!c) return;
     const f = new r.Vector3(
@@ -4452,8 +4492,8 @@ Please open a file.`,
         1e-4,
         Math.min(0.9999, this.splineClippingState.progress),
       ),
-      s = l.curvePath.getPointAt(u),
-      c = l.curvePath.getTangentAt(u).normalize(),
+      s = this.getWorldCurvePath(l).getPointAt(u),
+      c = this.getWorldCurvePath(l).getTangentAt(u).normalize(),
       f = this.splineClippingState.invert ? c.clone().negate() : c.clone();
     let d = 120;
     if (this.modelBBox && !this.modelBBox.isEmpty()) {
@@ -4498,7 +4538,7 @@ Please open a file.`,
     );
     if (!i || !i.curvePath) return;
     const r = window.THREE,
-      l = i.curvePath,
+      l = this.getWorldCurvePath(i),
       u = Math.max(1e-4, Math.min(0.9999, this.splineClippingState.progress)),
       s = l.getPointAt(u),
       c = l.getTangentAt(u).normalize(),
@@ -4654,11 +4694,13 @@ Please open a file.`,
   }
   async importCustomPlanningModel(i) {
     if (!window.THREE || !window.THREE.STLLoader) {
-      console.error("THREE.STLLoader not found");
-      return;
+      throw new Error("The STL loader is unavailable. Reload the viewer and try again.");
     }
-    const r = await new Promise((y) => {
+    if (getFileExtension(i.name) !== 'stl') throw new Error('Custom planning models must be STL files.');
+    await validateLocalFiles([i], getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode));
+    const r = await new Promise((y, reject) => {
         const w = new FileReader();
+        w.onerror = () => reject(new Error('The custom STL could not be read.'));
         ((w.onload = (C) => {
           var k;
           return y((k = C.target) == null ? void 0 : k.result);
@@ -5126,7 +5168,7 @@ Please open a file.`,
         this.planningObjects.length > u)
       ) {
         const c = this.planningObjects[this.planningObjects.length - 1];
-        this.updatePlaneGeometry(c.id, l.extWidth || 0, l.thickness || 0);
+        this.updatePlaneGeometry(c.id, l.extWidth ?? 0, l.thickness ?? 0, l.extLength ?? 0);
       }
     } else if (l.type === "cylinder")
       this.createPlanningCylinder(
@@ -5269,18 +5311,18 @@ Please open a file.`,
     if (!r) return;
     const l = this.planningObjects.filter((w) => w.groupId === i);
     if (l.length === 0) return;
-    const u = JSZip,
+    const u = await loadZip(),
       s = new u(),
       c = [];
     l.forEach((w) => {
       var V, U, $, q, G, X, R, Z, S, P, H, I, de, te, D, M, B, A, Q, W, oe, ze;
       const C = this.generateSTLString(w, !0);
-      C && s.file(`${w.name || w.id}.stl`, C);
+      C && s.file(`${encodeURIComponent(w.id)}.stl`, C);
       const k = { ...w };
       (delete k.mesh,
         delete k.labelSprite,
         delete k.labelDiv,
-        delete k.curvePath);
+        delete k.curvePath, delete k.worldCurveCache, delete k.fileDataURL);
       const z = window.THREE;
       let _ = {
           x:
@@ -5451,7 +5493,7 @@ Please open a file.`,
           };
           ((j.p1 = Oe(w.p1)), (j.p2Coord = Oe(w.p2Coord)), (j.p3 = Oe(w.p3)));
         } else if (w.type === "annotation" && w.position) {
-          const Oe = new z.Vector3(w.position.x, w.position.y, w.position.z);
+          const Oe = w.mesh ? w.mesh.getWorldPosition(new z.Vector3()) : new z.Vector3(w.position.x, w.position.y, w.position.z);
           (ye && Oe.applyMatrix4(ye.matrixWorld.clone().invert()),
             (j.position = { x: Oe.x, y: Oe.y, z: Oe.z }));
         }
@@ -5469,6 +5511,8 @@ Please open a file.`,
           (O = { x: De.x, y: De.y, z: De.z }));
       }
       c.push({
+        viewerDefinition: this.recordProceduralPlanningObject(w),
+        viewerModelMatrix: (this.getModelRoot()?.matrixWorld ?? new z.Matrix4()).toArray(),
         id: w.id,
         name: w.name || w.id,
         type: w.type,
@@ -5476,6 +5520,7 @@ Please open a file.`,
         groupId: w.groupId || null,
         groupName: r.name,
         ...j,
+        fileName: `${encodeURIComponent(w.id)}.stl`,
         posX: _.x,
         posY: _.y,
         posZ: _.z,
@@ -5534,20 +5579,118 @@ It contains both Slicer markup properties and the application's internal groupin
       b.click(),
       setTimeout(() => URL.revokeObjectURL(x), 1e3));
   }
+  recordProceduralPlanningObject(object) {
+    const definitionFields = {
+      plane: ['p1', 'p2', 'p3', 'extWidth', 'extLength', 'thickness'],
+      cylinder: ['p1', 'p2', 'diameter', 'extension'],
+      curve: ['points', 'thickness'], measurement: ['p1', 'p2Coord', 'angle', 'cardOffset'],
+      angle: ['p1', 'p2Coord', 'p3', 'angle', 'cardOffset'], point: ['points', 'diameter'],
+      annotation: ['position', 'normal', 'text', 'description', 'pinSize', 'cardOffset'],
+    };
+      if (!Object.hasOwn(definitionFields, object.type)) return undefined;
+      if (!object.mesh) throw new Error('This planning object has no reconstructable geometry.');
+      object.mesh.updateMatrixWorld(true);
+      const result: Record<string, any> = {
+        id: object.id, name: object.name || object.id, type: object.type,
+        color: safePlanningColor(object.color), visible: object.visible !== false,
+        opacity: object.opacity ?? object.mesh.material?.opacity,
+        groupId: object.groupId || null,
+        meshMatrix: object.mesh.matrixWorld.toArray(),
+      };
+      for (const field of definitionFields[object.type]) if (object[field] !== undefined) result[field] = object[field];
+      return JSON.parse(JSON.stringify(result));
+  }
+  exportShareWorkspace() {
+    const T = window.THREE;
+    if (!T || !this.viewer?.viewer || !this.loadedFilename) throw new Error('Load a model before sharing its workspace.');
+    const root = this.getModelRoot();
+    root?.updateMatrixWorld?.(true);
+    const objects = this.planningObjects.map(object => {
+      const definition = this.recordProceduralPlanningObject(object);
+      if (!definition) throw new Error('Custom STL and duplicated model meshes cannot be shared without model copies. Use the existing ZIP export instead.');
+      return definition;
+    });
+    return validateSharedWorkspace({
+      schemaVersion: 1,
+      coordinateSystem: { systemType: 'Viewer world with recorded model root', units: 'millimeters (mm)' },
+      modelMatrix: (root?.matrixWorld ?? new T.Matrix4()).toArray(), objects,
+      groups: this.planningGroups.map(group => ({ id: group.id, name: group.name, visible: group.visible !== false, collapsed: !!group.isCollapsed })),
+    });
+  }
+  async restoreShareWorkspace(input) {
+    const snapshot = validateSharedWorkspace(input);
+    const T = window.THREE;
+    if (!T || !this.viewer?.viewer || !this.loadedFilename) throw new Error('Load and verify the shared model before restoring planning data.');
+    const root = this.getModelRoot();
+    root?.updateMatrixWorld?.(true);
+    const current = (root?.matrixWorld ?? new T.Matrix4()).toArray();
+    if (current.some((value, index) => Math.abs(value - snapshot.modelMatrix[index]) > 1e-7 * Math.max(1, Math.abs(value)))) {
+      throw new Error('The loaded model uses a different coordinate frame. Planning data was not applied; ask its owner to recreate this share.');
+    }
+    // Never write a recipient's snapshot into filename-keyed owner workspaces.
+    this.readOnlySharedWorkspace = true;
+    this.planningStorageSuspended = true;
+    try {
+      this.clearAllPlanningObjects(false);
+      this.planningGroups = snapshot.groups.map(group => ({ id: group.id, name: group.name, visible: group.visible !== false, isCollapsed: !!group.collapsed }));
+      const vector = value => new T.Vector3(value.x, value.y, value.z);
+      for (const definition of snapshot.objects) {
+        const before = this.planningObjects.length;
+        switch (definition.type) {
+          case 'plane':
+            this.createPlanningPlane(vector(definition.p1), vector(definition.p2), vector(definition.p3), definition.extWidth, definition.extLength);
+            this.updatePlaneGeometry(this.planningObjects.at(-1).id, definition.extWidth ?? 0, definition.thickness ?? 0, definition.extLength ?? 0);
+            break;
+          case 'cylinder': this.createPlanningCylinder(vector(definition.p1), vector(definition.p2), definition.diameter / 2, definition.extension); break;
+          case 'curve': this.createPlanningCurve(definition.points.map(vector), definition.thickness); break;
+          case 'measurement': this.createPlanningMeasurement(vector(definition.p1), vector(definition.p2Coord), definition.angle ?? 0, definition.cardOffset); break;
+          case 'angle': this.createPlanningAngle(vector(definition.p1), vector(definition.p2Coord), vector(definition.p3), definition.angle ?? 0, definition.cardOffset); break;
+          case 'point': this.createPlanningPoint(vector(definition.points[0]), definition.diameter); break;
+          case 'annotation': this.createPlanningAnnotation(vector(definition.position), definition.normal ? vector(definition.normal) : null, definition.text, definition.description, definition.color, definition.pinSize, definition.cardOffset); break;
+        }
+        if (this.planningObjects.length !== before + 1) throw new Error('The planning object could not be reconstructed.');
+        const object = this.planningObjects.at(-1);
+        // Definitions and mesh matrices use the recorded scene frame. Apply the
+        // desired world transform once; the new object's parent may be transformed.
+        const desired = new T.Matrix4().fromArray(definition.meshMatrix);
+        object.mesh.parent?.updateMatrixWorld?.(true);
+        if (object.mesh.parent) desired.premultiply(new T.Matrix4().copy(object.mesh.parent.matrixWorld).invert());
+        desired.decompose(object.mesh.position, object.mesh.quaternion, object.mesh.scale);
+        object.mesh.updateMatrixWorld(true);
+        object.id = definition.id; object.name = definition.name;
+        object.color = definition.color || object.color;
+        object.opacity = definition.opacity;
+        object.groupId = definition.groupId;
+        object.visible = definition.visible !== false;
+        if (object.mesh.userData?.planningObjectId) object.mesh.userData.planningObjectId = object.id;
+        this.updateMeshColorAndVisibility(object);
+        this.updatePlanningCardLabel(object);
+      }
+      this.nextPlanningObjectId = Math.max(this.nextPlanningObjectId || 1, ...this.planningObjects.map(object => Number(String(object.id).split('_').at(-1)) + 1).filter(Number.isFinite));
+      this.notifyGroupsChanged();
+      this.config.onPlanningObjectsChange?.(this.planningObjects);
+      this.viewer.viewer.Render();
+    } catch (error) {
+      this.clearAllPlanningObjects(false);
+      this.planningGroups = [];
+      this.notifyGroupsChanged();
+      throw error;
+    } finally { this.planningStorageSuspended = false; }
+  }
   async exportAllPlanningObjectsZip() {
     if (this.planningObjects.length === 0) return;
-    const i = JSZip,
+    const i = await loadZip(),
       r = new i(),
       l = [];
     this.planningObjects.forEach((x) => {
       var N, O, j, V, U, $, q, G, X, R, Z, S, P, H, I, de, te, D, M, B, A, Q, W;
       const b = this.generateSTLString(x, !0);
-      b && r.file(`${x.name || x.id}.stl`, b);
+      b && r.file(`${encodeURIComponent(x.id)}.stl`, b);
       const y = { ...x };
       (delete y.mesh,
         delete y.labelSprite,
         delete y.labelDiv,
-        delete y.curvePath);
+        delete y.curvePath, delete y.worldCurveCache, delete y.fileDataURL);
       const w = window.THREE;
       let C = {
           x:
@@ -5718,7 +5861,7 @@ It contains both Slicer markup properties and the application's internal groupin
           };
           ((_.p1 = Ne(x.p1)), (_.p2Coord = Ne(x.p2Coord)), (_.p3 = Ne(x.p3)));
         } else if (x.type === "annotation" && x.position) {
-          const Ne = new w.Vector3(x.position.x, x.position.y, x.position.z);
+          const Ne = x.mesh ? x.mesh.getWorldPosition(new w.Vector3()) : new w.Vector3(x.position.x, x.position.y, x.position.z);
           (oe && Ne.applyMatrix4(oe.matrixWorld.clone().invert()),
             (_.position = { x: Ne.x, y: Ne.y, z: Ne.z }));
         }
@@ -5736,6 +5879,8 @@ It contains both Slicer markup properties and the application's internal groupin
           (z = { x: Ae.x, y: Ae.y, z: Ae.z }));
       }
       l.push({
+        viewerDefinition: this.recordProceduralPlanningObject(x),
+        viewerModelMatrix: (this.getModelRoot()?.matrixWorld ?? new w.Matrix4()).toArray(),
         id: x.id,
         name: x.name || x.id,
         type: x.type,
@@ -5748,6 +5893,7 @@ It contains both Slicer markup properties and the application's internal groupin
               : W.name)) ||
           "",
         ..._,
+        fileName: `${encodeURIComponent(x.id)}.stl`,
         posX: C.x,
         posY: C.y,
         posZ: C.z,
@@ -5927,7 +6073,7 @@ It contains both Slicer markup properties and the application's internal groupin
             };
             return [U(d.p1), U(d.p2Coord), U(d.p3)];
           } else if (d.type === "annotation" && d.position) {
-            const U = new s.Vector3(d.position.x, d.position.y, d.position.z);
+            const U = d.mesh ? d.mesh.getWorldPosition(new s.Vector3()) : new s.Vector3(d.position.x, d.position.y, d.position.z);
             return (c && U.applyMatrix4(c.matrixWorld.clone().invert()), [U]);
           }
           return [];
@@ -6005,6 +6151,7 @@ It contains both Slicer markup properties and the application's internal groupin
       u.push({
         type: y,
         coordinateSystem: "LPS",
+        coordinateUnits: "mm",
         labelFormat: `${w + (h + 1)}-%u`,
         controlPoints: C,
         name: d.name || d.id,
@@ -6037,6 +6184,7 @@ It contains both Slicer markup properties and the application's internal groupin
       "@schema":
         "https://raw.githubusercontent.com/slicer/slicer/master/Modules/Loadable/Markups/Resources/Schema/markups-schema-v1.0.3.json#",
       coordinateSystem: "LPS",
+      coordinateUnits: "mm",
       groupName: r,
       markups: u,
     };
@@ -6045,6 +6193,7 @@ It contains both Slicer markup properties and the application's internal groupin
   async loadSlicerMarkupsJson(i: any) {
     var s, c, f, d, h, m, x, b, y, w, C, k, z, _, N, O, j, V, U, $, q, G;
     if (!i || !window.THREE) return;
+    validateSlicerMarkups(i);
     // Handle both 3D Slicer container schema ({ markups: [...] }) and direct single markup object ({ type: "Fiducial", controlPoints: [...] })
     let markupsList = [];
     if (Array.isArray(i)) {
@@ -6063,8 +6212,7 @@ It contains both Slicer markup properties and the application's internal groupin
     u ? (l = u.id) : (l = this.addPlanningGroup(r));
     for (const X of markupsList) {
       const R = ((s = X.properties) == null ? void 0 : s.customType) || X.type;
-      let Z = X.coordinateSystem || i.coordinateSystem || "LPS";
-      Z = Z.toUpperCase();
+      const Z = normalizeSlicerCoordinateSystem(X.coordinateSystem ?? i.coordinateSystem);
       const S =
         ((c = X.display) == null ? void 0 : c.visibility) ?? X.visibility ?? !0;
       let P = "#00ff00",
@@ -6253,8 +6401,8 @@ It contains both Slicer markup properties and the application's internal groupin
           const D = te[0],
             M = te[1],
             B = te[2],
-            A = ((U = X.properties) == null ? void 0 : U.extWidth) || 10,
-            Q = (($ = X.properties) == null ? void 0 : $.extLength) || 10;
+            A = ((U = X.properties) == null ? void 0 : U.extWidth) ?? 10,
+            Q = (($ = X.properties) == null ? void 0 : $.extLength) ?? 10;
           if (
             (this.createPlanningPlane(
               new window.THREE.Vector3(D.x, D.y, D.z),
@@ -6274,7 +6422,8 @@ It contains both Slicer markup properties and the application's internal groupin
               this.updatePlaneGeometry(
                 W.id,
                 A,
-                ((q = X.properties) == null ? void 0 : q.thickness) || 0,
+                ((q = X.properties) == null ? void 0 : q.thickness) ?? 0,
+                Q,
               ));
           }
         } else if (X.center && X.orientation && X.size) {
@@ -6447,7 +6596,15 @@ It contains both Slicer markup properties and the application's internal groupin
   }
   async _recreatePlanningObjects(i: any, r?: any) {
     if (!i) return;
-    const l = i.objects || [];
+    validatePlanningMetadata(i, getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes);
+    const modelRoot = this.getModelRoot();
+    modelRoot?.updateMatrixWorld?.(true);
+    const modelMatrix = (modelRoot?.matrixWorld ?? new window.THREE.Matrix4()).toArray();
+    for (const item of i.objects) if (item.viewerDefinition && item.viewerModelMatrix.some((value, index) => Math.abs(value - modelMatrix[index]) > 1e-7 * Math.max(1, Math.abs(value)))) {
+      throw new Error('The planning bundle uses a different model coordinate frame. No planning data was imported.');
+    }
+    const l = (i.objects || []).map(item => item.viewerDefinition ? { ...item, ...item.viewerDefinition, viewerWorldDefinition: true } : { ...item, viewerWorldDefinition: false });
+    let worldCoordinates = false;
     let u = new Map();
     if (i.group) {
       let f = this.planningGroups.find((d) => d.name === i.group);
@@ -6468,7 +6625,7 @@ It contains both Slicer markup properties and the application's internal groupin
       }
     const s = this.getModelRoot(),
       c = (f) => {
-        if (s && window.THREE) {
+        if (s && window.THREE && !worldCoordinates) {
           const d = new window.THREE.Vector3(f.x, f.y, f.z);
           return (d.applyMatrix4(s.matrixWorld), { x: d.x, y: d.y, z: d.z });
         }
@@ -6476,6 +6633,7 @@ It contains both Slicer markup properties and the application's internal groupin
       };
     for (const f of l)
       try {
+        worldCoordinates = f.viewerWorldDefinition === true;
         let d = !1;
         if (f.type === "plane" && f.p1 && f.p2 && f.p3) {
           const h = c(f.p1),
@@ -6492,7 +6650,7 @@ It contains both Slicer markup properties and the application's internal groupin
             this.planningObjects.length > 0)
           ) {
             const b = this.planningObjects[this.planningObjects.length - 1];
-            this.updatePlaneGeometry(b.id, f.extWidth || 0, f.thickness || 0);
+            this.updatePlaneGeometry(b.id, f.extWidth ?? 0, f.thickness ?? 0, f.extLength ?? 0);
           }
           d = !0;
         } else if (f.type === "cylinder" && f.p1 && f.p2) {
@@ -6543,7 +6701,11 @@ It contains both Slicer markup properties and the application's internal groupin
             (d = !0));
         } else if (f.type === "annotation" && f.position) {
           const h = c(f.position),
-            m = f.normal ? c(f.normal) : null;
+            m = f.normal ? (() => {
+              const direction = new window.THREE.Vector3(f.normal.x, f.normal.y, f.normal.z);
+              if (s && !worldCoordinates) direction.transformDirection(s.matrixWorld);
+              return direction;
+            })() : null;
           (this.createPlanningAnnotation(
             new window.THREE.Vector3(h.x, h.y, h.z),
             m ? new window.THREE.Vector3(m.x, m.y, m.z) : null,
@@ -6577,11 +6739,12 @@ It contains both Slicer markup properties and the application's internal groupin
                   (_.endsWith(".stl") && k.includes(_.replace(/\.stl$/i, ""))))
               )
                 try {
-                  h = await r.files[z].async("arraybuffer");
+                  h = await readArchiveEntry(r, r.files[z], "arraybuffer", getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes);
                   const N = new Blob([h], { type: "application/octet-stream" });
                   m = URL.createObjectURL(N);
                   break;
                 } catch (N) {
+                  if (N instanceof ArchiveLimitError) throw N;
                   console.warn(
                     "Failed reading STL buffer from zip entry:",
                     z,
@@ -6592,7 +6755,7 @@ It contains both Slicer markup properties and the application's internal groupin
           }
           if (!h && f.fileDataURL)
             try {
-              const k = await fetch(f.fileDataURL);
+              const k = await fetch(validateEmbeddedPlanningAsset(f.fileDataURL, getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes));
               k.ok && (h = await k.arrayBuffer());
             } catch (k) {
               console.warn(
@@ -6608,6 +6771,7 @@ It contains both Slicer markup properties and the application's internal groupin
             );
             continue;
           }
+          await validateLocalFiles([new File([h], 'planning.stl')], getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode));
           const b = new window.THREE.STLLoader().parse(h);
           (s && window.THREE && b.applyMatrix4(s.matrixWorld),
             b.computeBoundingBox(),
@@ -6660,9 +6824,17 @@ It contains both Slicer markup properties and the application's internal groupin
         }
         if (d && this.planningObjects.length > 0) {
           const h = this.planningObjects[this.planningObjects.length - 1];
+          if (worldCoordinates) {
+            const desired = new window.THREE.Matrix4().fromArray(f.meshMatrix);
+            h.mesh.parent?.updateMatrixWorld?.(true);
+            if (h.mesh.parent) desired.premultiply(new window.THREE.Matrix4().copy(h.mesh.parent.matrixWorld).invert());
+            desired.decompose(h.mesh.position, h.mesh.quaternion, h.mesh.scale);
+            h.mesh.updateMatrixWorld(true);
+          }
           if (
             ((h.name = f.name),
-            (h.color = f.color),
+            (h.color = safePlanningColor(f.color)),
+            (h.opacity = f.opacity),
             (h.visible = typeof f.visible == "boolean" ? f.visible : !0),
             f.groupName && u.has(f.groupName))
           )
@@ -6681,6 +6853,7 @@ It contains both Slicer markup properties and the application's internal groupin
             this.updateMeshColorAndVisibility(h));
         }
       } catch (d) {
+        if (d instanceof ArchiveLimitError) throw d;
         console.error(
           "Error recreating planning object:",
           (f == null ? void 0 : f.name) || (f == null ? void 0 : f.id),
@@ -6693,6 +6866,8 @@ It contains both Slicer markup properties and the application's internal groupin
   }
   async importPlanningObjectsZip(i) {
     if (!window.THREE) return;
+    const profile = getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode);
+    if (!i || i.size <= 0 || i.size > profile.hardLimitBytes) throw new Error('The planning file is empty or exceeds this device limit.');
     const r = i.name.toLowerCase();
     if (r.endsWith(".json") || r.endsWith(".mrk.json")) {
       try {
@@ -6706,7 +6881,7 @@ It contains both Slicer markup properties and the application's internal groupin
           await this._recreatePlanningObjects(f);
         }
       } catch (c) {
-        console.error("Failed to parse standalone config JSON:", c);
+        throw new Error(`Planning JSON import failed: ${c instanceof Error ? c.message : 'Invalid data.'}`);
       }
       return;
     }
@@ -6719,16 +6894,16 @@ It contains both Slicer markup properties and the application's internal groupin
     }
     let u;
     try {
-      const c = JSZip as any;
-      u = c.default || c;
+      u = await loadZip();
     } catch (c) {
       console.error("Failed to load JSZip module:", c);
       return;
     }
     const s = new u();
     try {
-      const c = await s.loadAsync(l),
-        f = (b) =>
+      const c = await s.loadAsync(l);
+      validatePlanningArchiveEntries(c.files, getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode).hardLimitBytes);
+      const f = (b) =>
           !(
             b.startsWith("__MACOSX/") ||
             b.includes("/__MACOSX/") ||
@@ -6745,10 +6920,11 @@ It contains both Slicer markup properties and the application's internal groupin
       });
       if (m)
         try {
-          const b = await c.files[m].async("string");
+          const b = await readArchiveEntry(c, c.files[m], "string", profile.hardLimitBytes);
           h = JSON.parse(b);
         } catch (b) {
-          console.warn("Failed to parse metadata.json in zip:", b);
+          if (b instanceof ArchiveLimitError) throw b;
+            console.warn("Failed to parse metadata.json in zip:", b);
         }
       if (!h) {
         const b = d.find((y) => {
@@ -6759,9 +6935,10 @@ It contains both Slicer markup properties and the application's internal groupin
         });
         if (b)
           try {
-            const y = await c.files[b].async("string");
+            const y = await readArchiveEntry(c, c.files[b], "string", profile.hardLimitBytes);
             h = JSON.parse(y);
           } catch (y) {
+            if (y instanceof ArchiveLimitError) throw y;
             console.warn("Failed to parse .mrk.json in zip:", y);
           }
       }
@@ -6774,9 +6951,10 @@ It contains both Slicer markup properties and the application's internal groupin
         });
         if (b)
           try {
-            const y = await c.files[b].async("string");
+            const y = await readArchiveEntry(c, c.files[b], "string", profile.hardLimitBytes);
             h = JSON.parse(y);
           } catch (y) {
+            if (y instanceof ArchiveLimitError) throw y;
             console.warn("Failed to parse json file in zip:", y);
           }
       }
@@ -6799,10 +6977,11 @@ It contains both Slicer markup properties and the application's internal groupin
         for (const b of x) {
           const y = (b.split("/").pop() || "").replace(/\.stl$/i, "");
           try {
-            const w = await c.files[b].async("arraybuffer"),
+            const w = await readArchiveEntry(c, c.files[b], "arraybuffer", profile.hardLimitBytes),
               C = new File([w], `${y}.stl`);
             await this.importCustomPlanningModel(C);
           } catch (w) {
+            if (w instanceof ArchiveLimitError) throw w;
             console.error("Failed importing STL from zip:", b, w);
           }
         }
@@ -6812,7 +6991,7 @@ It contains both Slicer markup properties and the application's internal groupin
         "No compatible planning metadata (.json, .mrk.json) or STL files found in the zip archive.",
       );
     } catch (c) {
-      console.error("Failed to parse or load planning ZIP file:", c);
+      throw new Error(`Planning ZIP import failed: ${c instanceof Error ? c.message : 'Invalid data.'}`);
     }
   }
   highlightPlanningMesh(i) {

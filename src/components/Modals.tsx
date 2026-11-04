@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useViewer } from '../context/ViewerContext';
 import { QRCodeSVG } from 'qrcode.react';
-import JSZip from 'jszip';
+import { loadZip } from '../lib/loadZip';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
 import logoImg from '../assets/logo.png';
 import { GpuStatusModal } from './GpuStatusModal';
-import { InfoModal } from './InfoModal';
+const InfoModal = lazy(() => import('./InfoModal').then(module => ({ default: module.InfoModal })));
 import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
+import { createProtectedShare } from '../lib/sharedWorkspace';
 
 export function Modals() {
   const { activeModal, setActiveModal, filename, loadedUrl, isEmpty, resetWorkspace } = useViewer();
@@ -18,6 +19,92 @@ export function Modals() {
   // Share state based on preview mode (blob) vs deployed
   const [shareVal, setShareVal] = useState('');
   const [isSandbox, setIsSandbox] = useState(false);
+  const [protectedEnabled, setProtectedEnabled] = useState(false);
+  const [creatorKey, setCreatorKey] = useState('');
+  const [creatingShare, setCreatingShare] = useState(false);
+  const [protectedError, setProtectedError] = useState('');
+  const [protectedExpiry, setProtectedExpiry] = useState<string | null>(null);
+  const [isProtectedLink, setIsProtectedLink] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const shareAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (activeModal !== 'share') {
+      shareAbortRef.current?.abort();
+      setCreatorKey('');
+      setCreatingShare(false);
+      return;
+    }
+    const controller = new AbortController();
+    setProtectedEnabled(false);
+    void fetch('/api/shares/config', { signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' })
+      .then(async response => response.ok ? response.json() : null)
+      .then(value => { if (!controller.signal.aborted) setProtectedEnabled(value?.enabled === true); })
+      .catch(() => { /* Legacy model sharing remains available when the service is disabled. */ });
+    return () => controller.abort();
+  }, [activeModal]);
+
+  useEffect(() => {
+    // A link being created for an older model must not appear beside a new one.
+    return () => { shareAbortRef.current?.abort(); };
+  }, [loadedUrl]);
+
+  const handleCreateProtectedShare = async () => {
+    const manager = window._viewerManagerInstance;
+    if (!manager || !loadedUrl || creatingShare) return;
+    setProtectedError('');
+    const controller = new AbortController();
+    shareAbortRef.current = controller;
+    setCreatingShare(true);
+    try {
+      const url = new URL(loadedUrl, window.location.origin);
+      if (url.origin === window.location.origin && url.pathname.startsWith('/api/shares/')) {
+        throw new Error('This is an existing shared snapshot. Ask its owner to create a new snapshot from the source model.');
+      }
+      if (!/^https:$/.test(url.protocol) || !/\.stl$/i.test(url.pathname)) {
+        throw new Error('Protected sharing currently supports externally hosted STL files. Other models can use the existing direct link or file export.');
+      }
+      const result = await createProtectedShare({
+        sourceUrl: loadedUrl,
+        workspace: manager.exportShareWorkspace(),
+        modelIdentity: manager.loadedModelIdentity || ''
+      }, creatorKey, controller.signal);
+      if (controller.signal.aborted) return;
+      setShareVal(result.url);
+      setIsProtectedLink(true);
+      setProtectedExpiry(result.expiresAt);
+      setCreatedToken(result.token);
+    } catch (error) {
+      if (!controller.signal.aborted) setProtectedError(error instanceof Error ? error.message : 'The protected share could not be created.');
+    } finally {
+      if (!controller.signal.aborted) setCreatingShare(false);
+      if (shareAbortRef.current === controller) shareAbortRef.current = null;
+    }
+  };
+
+  const handleRevokeProtectedShare = async () => {
+    if (!createdToken || creatingShare) return;
+    setCreatingShare(true);
+    setProtectedError('');
+    const controller = new AbortController();
+    shareAbortRef.current = controller;
+    try {
+      const response = await fetch(`/api/shares/${createdToken}`, {
+        method: 'DELETE', credentials: 'omit', cache: 'no-store', redirect: 'error', signal: controller.signal,
+        headers: { Authorization: `Bearer ${creatorKey}` }
+      });
+      if (!response.ok) throw new Error('The link could not be revoked. Check the authorized key and try again.');
+      if (!controller.signal.aborted) {
+        setShareVal(''); setCreatedToken(null); setProtectedExpiry(null); setIsProtectedLink(false);
+        setProtectedError('The protected link was revoked. Create a new link if you want to share again.');
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setProtectedError(error instanceof Error ? error.message : 'The link could not be revoked.');
+    } finally {
+      if (!controller.signal.aborted) setCreatingShare(false);
+      if (shareAbortRef.current === controller) shareAbortRef.current = null;
+    }
+  };
 
   // Snapshot modal states
   const [snapRes, setSnapRes] = useState('medium');
@@ -33,11 +120,19 @@ export function Modals() {
   useEffect(() => {
     if (activeModal === 'share') {
       let baseUrl = window.location.href.split('#')[0].split('?')[0];
+      if (window.location.pathname.startsWith('/s/')) baseUrl = `${window.location.origin}/`;
+      setProtectedError(''); setProtectedExpiry(null); setIsProtectedLink(false); setCreatedToken(null); setCreatingShare(false);
       const isSandboxUrl = baseUrl.startsWith('blob:') || baseUrl.includes('.webcomponent.local') || window.location.hostname === 'localhost' || window.location.hostname.includes('.run.app');
       setIsSandbox(isSandboxUrl);
       
       if (!isEmpty && loadedUrl) {
-         if (isSandboxUrl) {
+         const currentModelUrl = new URL(loadedUrl, window.location.origin);
+         const protectedMatch = /^\/api\/shares\/([a-f0-9]{64})\/model\.stl$/.exec(currentModelUrl.pathname);
+         if (currentModelUrl.origin === window.location.origin && protectedMatch) {
+           setShareVal(`${window.location.origin}/s/${protectedMatch[1]}`);
+           setIsProtectedLink(true);
+           setProtectedExpiry(window._viewerManagerInstance?.sharedWorkspaceExpiresAt || null);
+         } else if (isSandboxUrl) {
            setShareVal(`https://ajaxlau.github.io/New3DViewer/#model=${encodeURIComponent(loadedUrl)}`);
          } else {
            setShareVal(`${baseUrl}#model=${encodeURIComponent(loadedUrl)}`);
@@ -186,7 +281,8 @@ export function Modals() {
     if (captured360.length === 0) return;
     const dlBaseName = (filename || 'snapshot').replace(/\.[^/.]+$/, "");
     try {
-      const zip = new JSZip();
+      const Zip = await loadZip();
+      const zip = new Zip();
       captured360.forEach((snap) => {
         const base64Data = snap.dataUrl.split(',')[1];
         zip.file(`${dlBaseName}_${snap.angle}deg.png`, base64Data, { base64: true });
@@ -256,7 +352,7 @@ export function Modals() {
   if (!activeModal || activeModal === 'planning') return null;
 
   if (activeModal === 'info') {
-    return <InfoModal onClose={() => setActiveModal(null)} />;
+    return <Suspense fallback={<div role="status" className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"><div className="rounded bg-white dark:bg-zinc-900 p-6 text-sm">Loading guide… <button className="ml-3 min-h-11 underline" onClick={() => setActiveModal(null)}>Close</button></div></div>}><InfoModal onClose={() => setActiveModal(null)} /></Suspense>;
   }
 
   return (
@@ -341,7 +437,7 @@ export function Modals() {
                 <>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">
                   {isSandbox && <><strong className="text-red-500">Preview Mode:</strong> You are in a temporary sandbox. Once deployed, it will look like this:<br/><br/></>}
-                  Scan the QR code or copy the link below to share this model:
+                  {isProtectedLink ? 'Protected workspace snapshot: the source address is hidden. Anyone with this link can view it until expiry.' : 'Direct model link: the original source URL is visible. This link does not include planning objects.'}
                 </p>
                 <div className="flex flex-col gap-4 mb-6">
                   <div className="bg-white p-4 rounded-md border border-zinc-200 dark:border-zinc-800 mx-auto shadow-sm flex items-center justify-center relative">
@@ -370,6 +466,20 @@ export function Modals() {
                 </div>
                 </>
             )}
+            {protectedExpiry && <p className="text-xs mb-3 text-zinc-600 dark:text-zinc-300">Expires {new Date(protectedExpiry).toLocaleString()}. The source host must remain available. Downloaded copies cannot be recalled.</p>}
+            {protectedEnabled && loadedUrl && !isProtectedLink && (
+              <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 mt-4 space-y-3">
+                <p className="text-xs text-zinc-600 dark:text-zinc-300">Create a 180-day link containing this model’s current annotations and analytic objects. The model stays at its original host; only workspace metadata is stored. Initial protected sharing supports external STL files without local custom meshes.</p>
+                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                  Authorized share-creation key
+                  <input type="password" autoComplete="off" value={creatorKey} onChange={event => setCreatorKey(event.target.value)} className="mt-1 block w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 text-sm" placeholder="Key provided by the platform owner" />
+                </label>
+                <button disabled={creatingShare || creatorKey.length < 32} onClick={handleCreateProtectedShare} className="min-h-11 px-4 py-2 rounded bg-blue-600 text-white text-xs font-semibold disabled:opacity-50">{creatingShare ? 'Creating protected link…' : 'Create protected workspace link'}</button>
+                <p className="text-[11px] text-zinc-500">The key is kept in memory while this dialog is open and is never included in the shared address.</p>
+              </div>
+            )}
+            {createdToken && <button disabled={creatingShare} className="min-h-11 text-xs text-red-600 underline" onClick={handleRevokeProtectedShare}>Revoke this protected link</button>}
+            {protectedError && <p role="alert" className="mt-3 text-xs text-red-600 dark:text-red-300">{protectedError}</p>}
             <div className="flex justify-end items-center gap-3 mt-6 w-full">
               <button 
                 className="flex-1 max-w-[120px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest border border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center text-center font-bold" 
@@ -377,7 +487,7 @@ export function Modals() {
               >
                 Close
               </button>
-              {loadedUrl && (
+              {loadedUrl && shareVal && (
                 <>
                   {activeModal === 'share' && (
                       <button 
