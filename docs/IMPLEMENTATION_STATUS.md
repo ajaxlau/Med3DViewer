@@ -25,6 +25,22 @@ or unsupported case. This status is not an independent security certification.
 
 The current local validation records 70 actual Node 22 test cases, type/build/artifact checks, Worker packaging and local workerd/D1 HTTP checks. See [LOCAL_VALIDATION.md](LOCAL_VALIDATION.md) for exact scope and limitations. Cloudflare, physical-device and broader Slicer acceptance remain separate gates; historical release checks are not evidence for this PR.
 
+Independent code review identified and requested fixes for uncancelled rejected
+model streams and two shared-load races: a late download replacing a newer manual
+load, and capturing a superseding import ID after awaiting validation. The UI
+implementation now has cancellation and request-ownership regression cases.
+These checks support the specific code boundaries; a real browser acceptance
+run remains pending.
+
+The installed Slicer 5.10.0 executable started successfully with an offscreen Qt
+platform. No viewer-export fixture was loaded or re-saved in that application,
+so this is startup availability evidence only and does not close the Slicer gate.
+The attempted browser test-server command was blocked in the execution permission
+flow and subsequently aborted; no new end-to-end browser result is claimed.
+
+See [Cloudflare sharing setup](SHARING_SETUP.md) for the isolated database and
+binding steps. Test/beta/main resources must remain separate.
+
 ## Explicit limits and deferred work
 
 - Protected sharing initially targets an approved remote STL source. Local-only

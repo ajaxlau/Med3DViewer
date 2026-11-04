@@ -18,7 +18,7 @@ Each database gets the same schema, a different UUID, and its own scope row. Bot
 
 ### 1. Create only the test database
 
-Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. Do not send any password/API token in chat.
+Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. The owner-provided test ID `5645e9dd-918f-4bbc-a0d6-9e1c315c27ca` is recorded in [config/shares.test.json](../config/shares.test.json). It is used only by the dedicated test target. Beta/main have no database defaults. Do not send any password/API token in chat.
 
 Open this database's **Console**. Copy and execute the SQL in [0001_shares.sql](../migrations/0001_shares.sql), then run:
 
@@ -41,11 +41,11 @@ Workers & Pages → Create application → import `ajaxlau/Med3DViewer` from Git
 | Build command | `npm run build:cloudflare` |
 | Deploy command | `npm run deploy:shares:test` |
 | Build variable `NODE_VERSION` | `22` |
-| Build variable `SHARES_DB_NAME` | `med3dviewer-shares-test` |
-| Build variable `SHARES_DB_ID` | UUID of the **test** database |
-| Build variable `SHARES_RESOURCE_TIER` | `test` |
+| Test database | Committed test profile; no additional database build variables required |
 
 This is the production slot **of the new test Worker**, not production of your existing app. Disable extra preview branches on this test Worker initially. If the first automatic build starts before settings are saved, save them and start a new build; do not repeatedly retry a build with obsolete commands.
+
+If old `SHARES_DB_NAME`, `SHARES_DB_ID` or `SHARES_RESOURCE_TIER` build variables already exist on this test Worker, they override the profile and must match the test name, UUID and `test` tier above. Remove obsolete overrides instead of copying beta/main values.
 
 The script generates an ignored `.share-config/test.json` declaring the `SHARES_DB` D1 binding, `ASSETS`, `SHARES_ENABLED=true`, `SHARES_ENVIRONMENT=test` and an hourly cleanup schedule. Do not put secrets in this build configuration. After deployment, inspect **Bindings** and verify `SHARES_DB` points to `med3dviewer-shares-test`; the Wrangler-generated configuration is authoritative. A manual dashboard binding alone will not replace this build configuration.
 
@@ -104,7 +104,7 @@ Use Node 22, `npm ci`, and authenticated Wrangler on your own machine. These com
 
 ```sh
 export SHARES_DB_NAME=med3dviewer-shares-test
-export SHARES_DB_ID=YOUR_TEST_DATABASE_UUID
+export SHARES_DB_ID=5645e9dd-918f-4bbc-a0d6-9e1c315c27ca
 export SHARES_RESOURCE_TIER=test
 npm run configure:shares -- test configure
 node node_modules/wrangler/bin/wrangler.js d1 migrations apply SHARES_DB --remote --config .share-config/test.json

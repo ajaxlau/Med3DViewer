@@ -1,7 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+
+// Only the dedicated test target has checked-in, non-secret defaults. Beta and
+// main always require their own explicit database settings at promotion time.
+export function deploymentSettings(target, env = process.env) {
+  const defaults = target === 'test'
+    ? JSON.parse(readFileSync(new URL('../config/shares.test.json', import.meta.url), 'utf8'))
+    : {};
+  return { ...defaults, ...env };
+}
 
 export function shareConfig(target, env = process.env, root = process.cwd()) {
   if (!['test', 'beta', 'main'].includes(target)) throw new Error('Target must be test, beta, or main.');
@@ -35,7 +45,7 @@ async function main() {
   if (!['configure', 'check', 'deploy', 'preview', 'migrate', 'cleanup'].includes(action)) throw new Error('Unknown share configuration action.');
   if (action === 'cleanup' && target !== 'beta') throw new Error('Standalone cleanup is only needed for beta Previews.');
   if ((target === 'beta' && action === 'deploy') || (target !== 'beta' && action === 'preview')) throw new Error('Beta uses preview; test/main use deploy.');
-  const config = shareConfig(target);
+  const config = shareConfig(target, deploymentSettings(target));
   if (action === 'cleanup') {
     config.name = 'ntec3dpo-m3dv-sharing-beta-cleanup';
     config.main = resolve('worker/cleanup-entry.ts');
