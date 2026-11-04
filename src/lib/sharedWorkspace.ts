@@ -5,6 +5,22 @@ import type { GpuCapabilities } from './gpuDetection';
 const TOKEN = /^[a-f0-9]{64}$/;
 const IDENTITY = /^[a-f0-9]{64}$/;
 const METADATA_LIMIT = 270 * 1024;
+const shareDownloadErrors: Record<string, string> = {
+  SOURCE_REDIRECT_UNSUPPORTED: 'Dropbox returned an unsupported download redirect. Ask the platform owner to check Dropbox compatibility.',
+  SOURCE_ACCESS_DENIED: 'Dropbox refused the server download. Check the file’s sharing permissions or try a new Dropbox link.',
+  SOURCE_NOT_FOUND: 'Dropbox could not find the source file. Ask its owner to check the original link.',
+  SOURCE_RATE_LIMITED: 'Dropbox temporarily limited downloads. Try again later.',
+  SOURCE_DECRYPTION_FAILED: 'This link cannot be read with the current sharing configuration. Ask its owner to create a new link.',
+  SOURCE_TIMEOUT: 'Dropbox took too long to respond. Try again later.',
+  SOURCE_FETCH_FAILED: 'The server could not download the model from Dropbox. Try again later.',
+  SOURCE_FORMAT: 'Dropbox returned a web page or other unsupported content instead of the model. Check the file’s sharing permissions.',
+  SOURCE_UNAVAILABLE: 'Dropbox did not provide the model file. Ask its owner to check the original link.',
+  MODEL_TOO_LARGE: 'This model exceeds the protected-sharing size limit. Ask its owner for a smaller model.',
+  SHARE_UNAVAILABLE: 'This share is unavailable or expired. Ask its owner for a new link.',
+  RATE_LIMITED: 'Too many share requests. Try again shortly.',
+  SHARING_DISABLED: 'Shared workspaces are temporarily unavailable. Try again later.',
+  SHARING_UNAVAILABLE: 'Shared workspaces are temporarily unavailable. Try again later.',
+};
 
 export interface SharedWorkspaceResponse {
   workspace: SharedPlanningWorkspace;
@@ -99,6 +115,21 @@ export function validateShareResponse(value: unknown, token: string, origin: str
   };
 }
 
+async function shareDownloadError(response: Response, signal: AbortSignal): Promise<Error> {
+  // Treat all server text as untrusted. Only show fixed messages for known codes,
+  // with a small read ceiling; a failed upstream must not expose its URL or body.
+  let code = '';
+  try {
+    if (/^application\/json(?:\s*;|$)/i.test(response.headers.get('Content-Type') || '')) {
+      const bytes = await readBoundedBytes(response, 4096, signal);
+      const data = JSON.parse(new TextDecoder().decode(bytes));
+      if (typeof data?.error?.code === 'string' && Object.hasOwn(shareDownloadErrors, data.error.code)) code = data.error.code;
+    } else await response.body?.cancel();
+  } catch { /* Malformed, oversized and non-JSON errors use a fixed fallback. */ }
+  abortIfNeeded(signal);
+  return new Error(code ? `${shareDownloadErrors[code]} (${code})` : `The shared model could not be downloaded. Try again or ask its owner to check the link. (HTTP ${response.status})`);
+}
+
 export async function loadSharedModel(
   token: string,
   options: { signal: AbortSignal; capabilities: GpuCapabilities | null; safeMode: boolean; origin?: string; onProgress?: (received: number, total: number | null) => void }
@@ -106,14 +137,14 @@ export async function loadSharedModel(
   if (!TOKEN.test(token)) throw new Error('This share address is invalid.');
   const origin = options.origin ?? window.location.origin;
   const response = await fetch(new URL(`/api/shares/${token}`, origin), { signal: options.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' });
-  if (!response.ok) throw new Error(response.status === 503 ? 'Shared workspaces are temporarily unavailable. Try again later.' : 'This share is unavailable or expired. Ask its owner for a new link.');
+  if (!response.ok) throw await shareDownloadError(response, options.signal);
   const bytes = await readBoundedBytes(response, METADATA_LIMIT, options.signal);
   let metadata: SharedWorkspaceResponse;
   try { metadata = validateShareResponse(JSON.parse(new TextDecoder().decode(bytes)), token, origin); }
   catch { throw new Error('This shared workspace is invalid, expired, or unsupported. Ask its owner to create a new link.'); }
   const profile = getDeviceLoadProfile(options.capabilities, options.safeMode);
   const model = await fetch(metadata.modelUrl, { signal: options.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' });
-  if (!model.ok) throw new Error('The shared model is unavailable. Its original host may no longer provide access.');
+  if (!model.ok) throw await shareDownloadError(model, options.signal);
   const modelBytes = await readBoundedBytes(model, profile.hardLimitBytes, options.signal, options.onProgress);
   abortIfNeeded(options.signal);
   if (await sha256Hex(modelBytes) !== metadata.modelIdentity) {

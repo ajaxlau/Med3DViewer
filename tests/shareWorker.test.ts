@@ -161,13 +161,147 @@ test('redirect to an unapproved source and upstream HTML fail without echoing pr
   const worker=createShareWorker({ fetch:async()=>{ calls++; return new Response(null,{ status:302,headers:{ Location:'https://attacker.example/model.stl?private=upstream-secret' } }); } });
   const share=await create(worker,env);
   const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
-  assert.equal(response.status,400);
+  assert.equal(response.status,502);
   assert.equal(calls,1);
-  assert(!(await response.text()).includes('upstream-secret'));
+  const error=await response.json() as any;
+  assert.equal(error.error.code,'SOURCE_REDIRECT_UNSUPPORTED');
+  assert(!JSON.stringify(error).includes('upstream-secret'));
   const html=createShareWorker({ fetch:async()=>new Response('<html>private</html>',{ headers:{ 'Content-Type':'text/html' } }) });
   const rejected=await html.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
   assert.equal(rejected.status,502);
   assert(!(await rejected.text()).includes('<html>'));
+  env.SHARES_DB.db.close();
+});
+
+test('Dropbox documented download redirects preserve access parameters and strip upstream response details',async()=>{
+  const env=environment();
+  const destinations=[
+    'https://www.dropbox.com/s/dl/synthetic/model.stl?rlkey=synthetic-access',
+    '/s/raw/synthetic/model.stl?rlkey=synthetic-access',
+    'https://cdn.dl.dropboxusercontent.com/synthetic/model.stl?download=synthetic-access',
+  ];
+  const visited:string[]=[];
+  let cancelled=0;
+  const worker=createShareWorker({ fetch:async(input,init)=>{
+    visited.push(String(input));
+    assert.equal(init?.redirect,'manual');
+    assert.equal(new Headers(init?.headers).get('Cookie'),null);
+    const location=destinations[visited.length-1];
+    if(location) return new Response(new ReadableStream({ cancel(){ cancelled++; } }),{ status:302,headers:{ Location:location } });
+    return new Response('solid synthetic\nendsolid synthetic',{ headers:{ 'Content-Type':'application/octet-stream','Set-Cookie':'private=source' } });
+  } });
+  const share=await create(worker,env);
+  const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+  assert.equal(response.status,200);
+  assert.equal(await response.text(),'solid synthetic\nendsolid synthetic');
+  assert.deepEqual(visited,[
+    'https://dl.dropboxusercontent.com/scl/fi/synthetic-id/model.stl?rlkey=synthetic-access',
+    destinations[0],`https://www.dropbox.com${destinations[1]}`,destinations[2],
+  ]);
+  assert.equal(cancelled,3);
+  assert.equal(response.headers.get('Set-Cookie'),null);
+  assert.equal(response.headers.get('Location'),null);
+  env.SHARES_DB.db.close();
+});
+
+test('download redirects reject lookalikes, login routes, credentials, ports and private destinations before fetching',async()=>{
+  const env=environment();
+  const share=await create(createShareWorker(),env);
+  for(const location of [
+    'https://www.dropbox.com/login?next=private',
+    'https://www.dropbox.com/s/dl.evil/model.stl',
+    'https://www.dropbox.com.evil.example/s/dl/model.stl',
+    'https://dl.dropboxusercontent.com.evil.example/model.stl',
+    'https://user:secret@www.dropbox.com/s/dl/model.stl',
+    'https://www.dropbox.com:444/s/dl/model.stl',
+    'http://www.dropbox.com/s/dl/model.stl',
+    'https://127.0.0.1/s/dl/model.stl',
+    'https://[::1]/s/raw/model.stl',
+  ]) {
+    let calls=0;
+    const worker=createShareWorker({ fetch:async()=>{ calls++; return new Response(null,{ status:302,headers:{ Location:location } }); } });
+    const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+    assert.equal(response.status,502);
+    const error=await response.json() as any;
+    assert.equal(error.error.code,'SOURCE_REDIRECT_UNSUPPORTED');
+    assert(!JSON.stringify(error).includes(location));
+    assert.equal(calls,1);
+  }
+  env.SHARES_DB.db.close();
+});
+
+test('Dropbox HTTP failures and transport errors return safe, distinct diagnostic codes',async()=>{
+  const env=environment();
+  const share=await create(createShareWorker(),env);
+  for(const [status,code] of [[401,'SOURCE_ACCESS_DENIED'],[403,'SOURCE_ACCESS_DENIED'],[404,'SOURCE_NOT_FOUND'],[410,'SOURCE_NOT_FOUND'],[429,'SOURCE_RATE_LIMITED'],[500,'SOURCE_UNAVAILABLE']] as const) {
+    let cancelled=false;
+    const worker=createShareWorker({ fetch:async()=>new Response(new ReadableStream({ cancel(){ cancelled=true; } }),{ status,headers:{ 'X-Private':'synthetic-secret' } }) });
+    const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+    assert.equal(response.status,502);
+    const error=await response.json() as any;
+    assert.equal(error.error.code,code);
+    assert.equal(response.headers.get('X-Private'),null);
+    assert.equal(cancelled,true);
+  }
+  const network=createShareWorker({ fetch:async()=>{ throw new Error('https://private.example/?access=synthetic-secret'); } });
+  const response=await network.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+  const error=await response.json() as any;
+  assert.equal(error.error.code,'SOURCE_FETCH_FAILED');
+  assert(!JSON.stringify(error).includes('synthetic-secret'));
+  env.SHARES_DB.db.close();
+});
+
+test('changed encryption secret is distinguished from an unavailable Dropbox file without fetching',async()=>{
+  const env=environment();
+  let calls=0;
+  const worker=createShareWorker({ fetch:async()=>{ calls++; return new Response('solid synthetic'); } });
+  const share=await create(worker,env);
+  env.SHARES_ENCRYPTION_KEY='different-test-only-random-secret-'.repeat(2);
+  const config=await worker.fetch(new Request('https://viewer.example.com/api/shares/config'),env);
+  assert.deepEqual(await config.json(),{ enabled:true });
+  const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+  const error=await response.json() as any;
+  assert.equal(response.status,502);
+  assert.equal(error.error.code,'SOURCE_DECRYPTION_FAILED');
+  assert.equal(calls,0);
+  env.SHARES_DB.db.close();
+});
+
+test('upstream header timeout reports a safe timeout code',async t=>{
+  t.mock.timers.enable({ apis:['setTimeout'] });
+  const env=environment();
+  let started:()=>void;
+  const fetching=new Promise<void>(resolve=>{ started=resolve; });
+  const worker=createShareWorker({ fetch:async(_input,init)=>new Promise<Response>((_resolve,reject)=>{
+    init!.signal!.addEventListener('abort',()=>reject(new Error('private upstream details')),{ once:true });
+    started();
+  }) });
+  const share=await create(worker,env);
+  const pending=worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
+  await fetching;
+  t.mock.timers.tick(180_000);
+  const response=await pending;
+  const error=await response.json() as any;
+  assert.equal(response.status,504);
+  assert.equal(error.error.code,'SOURCE_TIMEOUT');
+  assert(!JSON.stringify(error).includes('private upstream details'));
+  env.SHARES_DB.db.close();
+});
+
+test('runtimes without an incoming request signal still stream and cancel the upstream',async()=>{
+  const env=environment();
+  let signal:AbortSignal|undefined;
+  const worker=createShareWorker({ fetch:async(_input,init)=>{
+    signal=init?.signal as AbortSignal;
+    return new Response(new ReadableStream({ pull(output){ output.enqueue(new Uint8Array([1])); } }));
+  } });
+  const share=await create(worker,env);
+  const request=new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`);
+  Object.defineProperty(request,'signal',{ value:undefined });
+  const response=await worker.fetch(request,env);
+  assert.equal(response.status,200);
+  await response.body!.cancel();
+  assert.equal(signal?.aborted,true);
   env.SHARES_DB.db.close();
 });
 

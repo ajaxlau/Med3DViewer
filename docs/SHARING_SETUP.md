@@ -94,6 +94,22 @@ Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm the 
 
 The creator key is memory-only and cleared when the dialog closes; shared snapshots are not auto-saved to recipient localStorage. A bearer link can be forwarded. Expiry cannot recall already downloaded/rendered data. The model must remain available at Dropbox; a changed file is rejected before its old workspace is applied, although changed bytes may already have been streamed to the browser.
 
+### Dropbox downloads but the protected link fails
+
+The Worker follows Dropbox's documented `/s/dl` and `/s/raw` redirects on Dropbox-owned HTTPS hosts, plus its approved download-content hosts. Each redirect is checked before fetching; login pages, unrelated hosts, credentials and non-default ports are rejected. No recipient cookies or creator credentials are forwarded to Dropbox. See [Dropbox's download-redirect documentation](https://help.dropbox.com/share/force-download).
+
+The viewer shows a fixed diagnostic code instead of exposing Dropbox's response, source address or access parameters. After the latest test deployment, reopen the protected link in a new Private/Incognito window. If it fails, report only the displayed error code and message:
+
+| Code | Check |
+| --- | --- |
+| `SOURCE_REDIRECT_UNSUPPORTED` | A redirect fell outside the approved Dropbox download routes or exceeded the redirect limit. Report the code; do not post its private target URL. |
+| `SOURCE_ACCESS_DENIED` / `SOURCE_NOT_FOUND` | Dropbox rejected the server request or could not find the file. Verify the original file's sharing permissions; a browser download may use a signed-in Dropbox session that the Worker does not have. |
+| `SOURCE_FORMAT` | Dropbox returned a web page/unsupported content rather than the model. Check the source link's sharing permissions. |
+| `SOURCE_RATE_LIMITED` / `SOURCE_TIMEOUT` / `SOURCE_FETCH_FAILED` | Retry later; Dropbox or the server download path is temporarily unavailable. |
+| `SOURCE_DECRYPTION_FAILED` | The saved source cannot be decrypted, for example after an encryption-secret change. Keep the current secret stable and create a new disposable test link; do not reset D1 or post secret values. |
+
+`/api/shares/config` returning `true` checks configuration readiness; it does not prove that an older record remains decryptable or that Dropbox permits a server download. An existing link needs no recreation for the redirect fix when its encryption secret is unchanged.
+
 ### 5. Check cleanup without waiting 180 days
 
 Use **only a disposable synthetic test share**. In the test D1 console, inspect recent timestamps and hashes without exposing source references or workspace content:

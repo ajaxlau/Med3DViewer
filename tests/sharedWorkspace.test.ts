@@ -81,6 +81,44 @@ test('changed source bytes refuse workspace restoration', async t => {
   assert.equal(requests, 2);
 });
 
+test('download errors show an allowlisted diagnostic without exposing server text', async t => {
+  for(const code of ['SOURCE_ACCESS_DENIED','SOURCE_NOT_FOUND','SOURCE_RATE_LIMITED','SOURCE_REDIRECT_UNSUPPORTED','SOURCE_DECRYPTION_FAILED','SOURCE_FETCH_FAILED','SOURCE_FORMAT','SOURCE_TIMEOUT','MODEL_TOO_LARGE','RATE_LIMITED','SHARING_DISABLED']) {
+    let requests=0;
+    const mock=t.mock.method(globalThis,'fetch',async()=>++requests===1
+      ? new Response(JSON.stringify(metadata()))
+      : new Response(JSON.stringify({ error:{ code,message:'https://private.example/model.stl?access=synthetic-secret' } }),{ status:502,headers:{ 'Content-Type':'application/json; charset=utf-8' } }));
+    await assert.rejects(loadSharedModel(token,{ signal:new AbortController().signal,capabilities:null,safeMode:true,origin }),error=>{
+      const message=(error as Error).message;
+      assert(message.includes(`(${code})`));
+      assert(!message.includes('private.example'));
+      assert(!message.includes('synthetic-secret'));
+      return true;
+    });
+    assert.equal(requests,2);
+    mock.mock.restore();
+  }
+});
+
+test('malformed or oversized error responses cancel safely and show only a fixed fallback', async t => {
+  for(const kind of ['html','invalid-json','unknown-code','oversized']) {
+    let requests=0,cancelled=false;
+    const mock=t.mock.method(globalThis,'fetch',async()=>{
+      if(++requests===1) return new Response(JSON.stringify(metadata()));
+      const body=kind==='html'?'<html>synthetic-secret</html>':kind==='invalid-json'?'synthetic-secret':kind==='unknown-code'?JSON.stringify({ error:{ code:'__proto__',message:'synthetic-secret' } }):'synthetic-secret'.repeat(500);
+      return new Response(new ReadableStream({ start(output){ output.enqueue(new TextEncoder().encode(body)); if(kind==='invalid-json'||kind==='unknown-code') output.close(); },cancel(){ cancelled=true; } }),{
+        status:502,headers:{ 'Content-Type':kind==='html'?'text/html':'application/json' },
+      });
+    });
+    await assert.rejects(loadSharedModel(token,{ signal:new AbortController().signal,capabilities:null,safeMode:true,origin }),error=>{
+      assert.match((error as Error).message,/HTTP 502/);
+      assert(!(error as Error).message.includes('synthetic-secret'));
+      return true;
+    });
+    assert.equal(cancelled,kind==='html'||kind==='oversized');
+    mock.mock.restore();
+  }
+});
+
 test('share creation authenticates with a header and excludes creator key from JSON/address', async t => {
   const key = 'synthetic-test-key-'.repeat(3);
   const currentOrigin = window.location.origin;

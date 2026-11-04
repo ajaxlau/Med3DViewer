@@ -100,20 +100,37 @@ async function decryptSource(value: string, hash: string, env: ShareEnvironment)
   const bytes = (input: string) => new Uint8Array(input.match(/../g)!.map(item => parseInt(item, 16)));
   return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(ivHex), additionalData: encoder.encode(hash) }, await aesKey(env), bytes(ciphertext)));
 }
-export function validateSource(raw: unknown, env: ShareEnvironment, origin: string, normalize = false): URL {
+function sourceUrl(raw: unknown, origin: string): URL {
   if (typeof raw !== 'string' || raw.length > 4096 || /[\u0000-\u0020\u007f]/.test(raw)) throw new ShareError(400, 'SOURCE_INVALID', 'Use an approved HTTPS model URL.');
   let url: URL;
   try { url = new URL(raw); } catch { throw new ShareError(400, 'SOURCE_INVALID', 'Use an approved HTTPS model URL.'); }
   if (url.protocol !== 'https:' || url.port || url.username || url.password || url.origin === origin) throw new ShareError(400, 'SOURCE_INVALID', 'Use an approved HTTPS model URL.');
+  url.hash = '';
+  return url;
+}
+function isDropboxContentHost(hostname: string): boolean {
+  return hostname === 'dl.dropboxusercontent.com' || hostname.endsWith('.dl.dropboxusercontent.com');
+}
+export function validateSource(raw: unknown, env: ShareEnvironment, origin: string, normalize = false): URL {
+  const url = sourceUrl(raw, origin);
   if (normalize && ['dropbox.com', 'www.dropbox.com'].includes(url.hostname) && /^\/(?:s\/[^/]+\/|scl\/fi\/[^/]+\/)/.test(url.pathname)) {
     url.hostname = 'dl.dropboxusercontent.com';
     url.searchParams.delete('dl');
     url.searchParams.delete('raw');
   }
-  const dropbox = url.hostname === 'dl.dropboxusercontent.com' || url.hostname.endsWith('.dl.dropboxusercontent.com');
-  if (!dropbox) throw new ShareError(400, 'SOURCE_HOST_UNSUPPORTED', 'Protected sharing currently requires a Dropbox file-sharing link.');
-  url.hash = '';
+  if (!isDropboxContentHost(url.hostname)) throw new ShareError(400, 'SOURCE_HOST_UNSUPPORTED', 'Protected sharing currently requires a Dropbox file-sharing link.');
   return url;
+}
+function downloadRedirect(raw: string, origin: string): URL {
+  try {
+    const url = sourceUrl(raw, origin);
+    // Dropbox documents /s/dl and /s/raw redirects on its own subdomains.
+    // Allow only these download routes, not arbitrary Dropbox web/login pages.
+    const downloadRoute = (url.hostname === 'dropbox.com' || url.hostname.endsWith('.dropbox.com'))
+      && /^\/s\/(?:dl|raw)(?:\/|$)/.test(url.pathname);
+    if (isDropboxContentHost(url.hostname) || downloadRoute) return url;
+  } catch { /* Never expose a rejected Location header. */ }
+  throw new ShareError(502, 'SOURCE_REDIRECT_UNSUPPORTED', 'Dropbox redirected the download to an unsupported destination.');
 }
 function extension(url: URL): string {
   let name: string;
@@ -215,14 +232,19 @@ function safeModelHeaders(upstream: Response, ext: string): Headers {
 async function streamModel(request: Request, record: ShareRecord, env: ShareEnvironment, upstreamFetch: typeof fetch): Promise<Response> {
   const controller = new AbortController();
   const cancelled = () => controller.abort();
-  request.signal.addEventListener('abort', cancelled, { once: true });
-  if (request.signal.aborted) controller.abort();
+  const requestSignal = request.signal;
+  requestSignal?.addEventListener('abort', cancelled, { once: true });
+  if (requestSignal?.aborted) controller.abort();
+  let timedOut = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let pendingBody: ReadableStream<Uint8Array> | null | undefined;
-  const clear = () => { if (timeout) clearTimeout(timeout); request.signal.removeEventListener('abort',cancelled); };
+  const clear = () => { if (timeout) clearTimeout(timeout); requestSignal?.removeEventListener('abort',cancelled); };
   try {
-    let source = validateSource(await decryptSource(record.source_ciphertext,record.token_hash,env),env,new URL(request.url).origin);
+    let decrypted: string;
+    try { decrypted = await decryptSource(record.source_ciphertext,record.token_hash,env); }
+    catch { throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','This link cannot be read with the current sharing configuration. Ask its owner to create a new link.'); }
+    let source = validateSource(decrypted,env,new URL(request.url).origin);
     const headers = new Headers({ 'Accept-Encoding': 'identity', 'Cache-Control': 'no-store' });
     const range = request.headers.get('Range');
     if (range) {
@@ -235,7 +257,7 @@ async function streamModel(request: Request, record: ShareRecord, env: ShareEnvi
       }
       headers.set('Range',range);
     }
-    timeout = setTimeout(() => controller.abort(), 180_000);
+    timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 180_000);
     let upstream: Response | undefined;
     for (let redirects = 0; redirects <= 3; redirects++) {
       upstream = await upstreamFetch(source.href, {
@@ -246,9 +268,15 @@ async function streamModel(request: Request, record: ShareRecord, env: ShareEnvi
       if (![301,302,303,307,308].includes(upstream.status)) break;
       const target = upstream.headers.get('Location');
       await upstream.body?.cancel();
-      if (!target || redirects === 3) throw new ShareError(502,'SOURCE_UNAVAILABLE','The source model could not be retrieved.');
-      source = validateSource(new URL(target,source.href).href,env,new URL(request.url).origin);
+      if (!target || redirects === 3) throw new ShareError(502,'SOURCE_REDIRECT_UNSUPPORTED','Dropbox returned too many or incomplete download redirects.');
+      let resolved: string;
+      try { resolved = new URL(target,source.href).href; }
+      catch { throw new ShareError(502,'SOURCE_REDIRECT_UNSUPPORTED','Dropbox returned an invalid download redirect.'); }
+      source = downloadRedirect(resolved,new URL(request.url).origin);
     }
+    if (upstream?.status === 401 || upstream?.status === 403) throw new ShareError(502,'SOURCE_ACCESS_DENIED','Dropbox refused the server download. Check the source sharing permissions.');
+    if (upstream?.status === 404 || upstream?.status === 410) throw new ShareError(502,'SOURCE_NOT_FOUND','Dropbox could not find the source file. Ask its owner to check the original link.');
+    if (upstream?.status === 429) throw new ShareError(502,'SOURCE_RATE_LIMITED','Dropbox temporarily limited downloads. Try again later.');
     if (!upstream || ![200,206].includes(upstream.status)) throw new ShareError(502,'SOURCE_UNAVAILABLE','The source model is unavailable. It may have expired at its original host.');
     if (/text\/html|application\/(?:json|xhtml\+xml)/i.test(upstream.headers.get('Content-Type') || '')) throw new ShareError(502,'SOURCE_FORMAT','The source did not return a supported model.');
     const declared = Number(upstream.headers.get('Content-Length'));
@@ -279,7 +307,8 @@ async function streamModel(request: Request, record: ShareRecord, env: ShareEnvi
   } catch (error) {
     controller.abort(); await reader?.cancel().catch(() => {}); await pendingBody?.cancel().catch(() => {}); clear();
     if (error instanceof ShareError) throw error;
-    throw new ShareError(502,'SOURCE_UNAVAILABLE','The source model could not be retrieved.');
+    if (timedOut) throw new ShareError(504,'SOURCE_TIMEOUT','Dropbox took too long to respond. Try again later.');
+    throw new ShareError(502,'SOURCE_FETCH_FAILED','The server could not download the model from Dropbox. Try again later.');
   }
 }
 export function createShareWorker(dependencies: Dependencies = {}) {
