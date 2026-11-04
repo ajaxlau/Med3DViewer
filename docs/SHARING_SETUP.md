@@ -43,7 +43,7 @@ Workers & Pages → Create application → import `ajaxlau/Med3DViewer` from Git
 | Build variable `NODE_VERSION` | `22` |
 | Test database | Committed test profile; no additional database build variables required |
 
-This is the production slot **of the new test Worker**, not production of your existing app. Disable extra preview branches on this test Worker initially. If the first automatic build starts before settings are saved, save them and start a new build; do not repeatedly retry a build with obsolete commands.
+This is the production slot **of the new test Worker**, not production of your existing app. Cloudflare's Git import may add a commit renaming the root `wrangler.jsonc` to the test Worker. Keep that change on this draft test branch only. Before a beta/main merge, restore the root name to `ntec3dpo-m3dv`; the explicit generated test configuration still uses `ntec3dpo-m3dv-sharing-test`. Do not promote a root test-Worker name into the existing service. Disable extra preview branches on this test Worker initially. If the first automatic build starts before settings are saved, save them and start a new build; do not repeatedly retry a build with obsolete commands.
 
 If old `SHARES_DB_NAME`, `SHARES_DB_ID` or `SHARES_RESOURCE_TIER` build variables already exist on this test Worker, they override the profile and must match the test name, UUID and `test` tier above. Remove obsolete overrides instead of copying beta/main values.
 
@@ -71,6 +71,14 @@ Deploy/save the secret changes. Check the test Worker URL shown by Cloudflare, n
 ```
 
 `false` means sharing stays disabled. Verify the binding/UUID, scope row, runtime variables and secret names/lengths. It intentionally does not reveal secrets or database internals. Never turn on production sharing just to troubleshoot test configuration.
+
+### Successful deployment but no visible URL
+
+The dedicated test configuration explicitly sets `workers_dev=true`. Deploy the latest PR commit so that setting takes effect. In **Workers & Pages → ntec3dpo-m3dv-sharing-test → Domains**, check the `workers.dev` entry and select **Enable** if it is disabled. Older dashboard layouts place this under **Settings → Domains & Routes**. No custom domain or DNS record is needed for this test address.
+
+With the existing account subdomain, expect `https://ntec3dpo-m3dv-sharing-test.x-panda.workers.dev/`. Copy the actual URL shown on the Domains tab and append `/api/shares/config`. A response of `{"enabled":false}` means the HTTP address works but the D1 scope/binding or runtime secrets still need checking; a missing address is a separate routing/deployment issue. Check the latest deployment log for **Deployed** and the printed URL, rather than treating a successful build or version upload alone as a public deployment.
+
+This flag is added only to the dedicated test target. Beta/main routing configuration is preserved. [Cloudflare Domains tab](https://developers.cloudflare.com/changelog/post/2026-05-14-domains-tab/)
 
 ### 4. Test the existing Share workflow
 

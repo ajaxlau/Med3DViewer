@@ -25,6 +25,7 @@ test('share deployment targets isolate names, scope and Worker Previews', () => 
     assert.equal(config.vars.SHARES_ENVIRONMENT,tier);
     assert.equal(config.d1_databases[0].database_name,`med3dviewer-shares-${tier}`);
     assert.equal(config.name,tier==='test'?'ntec3dpo-m3dv-sharing-test':'ntec3dpo-m3dv');
+    assert.equal(config.workers_dev,tier==='test'?true:undefined);
     assert.equal('previews' in config,tier==='beta');
     assert.equal('triggers' in config,tier!=='beta');
     if(tier==='beta') {

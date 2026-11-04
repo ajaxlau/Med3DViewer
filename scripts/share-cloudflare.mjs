@@ -24,6 +24,8 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
   /** @type {Record<string, any>} */
   const config = {
     name: target === 'test' ? 'ntec3dpo-m3dv-sharing-test' : 'ntec3dpo-m3dv',
+    // Publish a public address for the dedicated test Worker explicitly.
+    ...(target === 'test' ? { workers_dev: true } : {}),
     main: resolve(root, 'worker/entry.ts'),
     compatibility_date: '2026-10-03',
     assets: { directory: resolve(root, 'dist'), binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: ['/api/shares', '/api/shares/*', '/s/*'] },
