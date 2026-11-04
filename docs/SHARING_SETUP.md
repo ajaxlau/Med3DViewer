@@ -80,6 +80,12 @@ With the existing account subdomain, expect `https://ntec3dpo-m3dv-sharing-test.
 
 This flag is added only to the dedicated test target. Beta/main routing configuration is preserved. [Cloudflare Domains tab](https://developers.cloudflare.com/changelog/post/2026-05-14-domains-tab/)
 
+### Viewer appears instead of JSON at the API address
+
+The PWA must not serve its offline app shell for `/api` navigation requests. The build now excludes API paths from Workbox's navigation fallback. Deploy the latest PR commit, then test the endpoint in a **new Private/Incognito window** to avoid an older installed service worker. No database reinitialization is needed for this routing fix.
+
+If a fresh private window shows JSON, the address/backend route is reachable. `{"enabled":false}` then means the binding/scope/runtime variables or secrets still need checking. If the app page still appears even in a fresh private window, inspect the deployed commit and confirm the deploy command is `npm run deploy:shares:test`, with a Worker entry point and `assets.run_worker_first` covering `/api/shares/*`. Do not treat an HTML app-shell response as a database or secret failure.
+
 ### 4. Test the existing Share workflow
 
 Use a synthetic/de-identified **Dropbox STL** first. Load it through the existing URL dialog; wait for ready. Create a distance, angle, point, plane/curve and annotation, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected link.
