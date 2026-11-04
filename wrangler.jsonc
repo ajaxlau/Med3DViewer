@@ -1,5 +1,5 @@
 {
-  "name": "ntec3dpo-m3dv",
+  "name": "ntec3dpo-m3dv-sharing-test",
   "compatibility_date": "2026-10-03",
   "main": "./worker/entry.ts",
   "vars": { "SHARES_ENABLED": "false" },
