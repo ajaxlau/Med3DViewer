@@ -1,5 +1,7 @@
 # Security review for the isolated sharing test PR
 
+Current sharing policy and migration-3 controls are documented in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md): admin-only administration, assigned sharing-user passwords, public recipients, explicit versioned saves, bounded history and revocation. Earlier review notes below describe the initial test implementation.
+
 Reviewed 4 November 2026. This is a focused source review and local test record,
 not a security certification or approval to deploy patient-identifying data.
 Keep the PR in draft until the Cloudflare, source-host and device checks in

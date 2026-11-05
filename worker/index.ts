@@ -1,4 +1,5 @@
 import { validateSharedWorkspace } from '../src/lib/planningData';
+import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
 import { cleanupExpiredShares, databaseScopeMatches } from './cleanup';
 
 // Local interfaces keep the browser's dependency graph free of Workers SDKs.
@@ -38,6 +39,7 @@ interface ShareRecord {
   view_token_ciphertext?: string | null;
   edit_token_ciphertext?: string | null;
   role?: 'view' | 'edit';
+  include_workspace?: number; editing_enabled?: number; auth_epoch?: number; workspace_version?: number;
 }
 interface Dependencies { now?: () => number; fetch?: typeof fetch }
 const DAY = 86_400_000;
@@ -72,11 +74,17 @@ async function environmentReady(env: ShareEnvironment): Promise<boolean> {
 }
 async function editableSchemaReady(env: ShareEnvironment): Promise<boolean> {
   try {
-    return (await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>())?.version === 2;
+    return ((await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>())?.version || 0) >= 2;
   } catch { return false; }
 }
 async function requireEditableSchema(env: ShareEnvironment): Promise<void> {
   if (!await editableSchemaReady(env)) throw new ShareError(503,'UPGRADE_REQUIRED','Apply the editable-workspace database migration before using this feature.');
+}
+async function historySchemaReady(env: ShareEnvironment): Promise<boolean> {
+  try { return ((await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>())?.version || 0) >= 3; } catch { return false; }
+}
+async function requireHistorySchema(env: ShareEnvironment): Promise<void> {
+  if (!await historySchemaReady(env)) throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0003 before using public workspace history.');
 }
 function hex(buffer: ArrayBuffer | Uint8Array): string {
   return Array.from(new Uint8Array(buffer as ArrayBuffer), value => value.toString(16).padStart(2, '0')).join('');
@@ -86,12 +94,12 @@ export async function hashToken(value: string): Promise<string> {
 }
 async function authenticate(request: Request, env: ShareEnvironment): Promise<string> {
   const provided = request.headers.get('Authorization') || '';
-  if (!provided.startsWith('Bearer ') || provided.length > 1024) throw new ShareError(401, 'UNAUTHORIZED', 'Share creation requires the creator access key.');
+  if (!provided.startsWith('Bearer ') || provided.length > 1024) throw new ShareError(401, 'UNAUTHORIZED', 'Administrator authorization is required.');
   const actual = await hashToken(provided.slice(7));
   const expected = await hashToken(env.SHARES_CREATE_KEY!);
   let difference = 0;
   for (let i = 0; i < actual.length; i++) difference |= actual.charCodeAt(i) ^ expected.charCodeAt(i);
-  if (difference) throw new ShareError(401, 'UNAUTHORIZED', 'The creator access key was not accepted.');
+  if (difference) throw new ShareError(401, 'UNAUTHORIZED', 'The administrator password was not accepted.');
   return expected;
 }
 async function aesKey(env: ShareEnvironment): Promise<CryptoKey> {
@@ -191,10 +199,16 @@ async function rateLimit(request: Request, env: ShareEnvironment, now: number): 
   if (!result || result.count > 120) throw new ShareError(429, 'RATE_LIMITED', 'Too many share requests. Try again shortly.');
 }
 async function createShare(request: Request, env: ShareEnvironment, now: number): Promise<Response> {
-  await authenticate(request, env);
-  const owner = `creator:${env.SHARES_ENVIRONMENT}`;
+  const history = await historySchemaReady(env);
+  let owner = `creator:${env.SHARES_ENVIRONMENT}`;
   const body = await readJson(request) as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'modelIdentity','label'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'modelIdentity','label','includeWorkspace','sharingUsername','sharingPassword'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  const includeWorkspace = body.includeWorkspace !== false;
+  if (body.includeWorkspace !== undefined && typeof body.includeWorkspace !== 'boolean') throw new ShareError(400,'REQUEST_INVALID','Choose model-only or workspace sharing.');
+  if(history && includeWorkspace) owner=`sharer:${await authenticateSharingUser(request,body.sharingUsername,body.sharingPassword,env,now)}`;
+  else if(!history) await authenticate(request,env);
+  else {owner='public-model';await limitedAttempts(request,env,now,'public-create',5,DAY);}
+  if (!includeWorkspace && !history) throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0003 for model-only public sharing.');
   const label = workspaceLabel(body.label ?? '');
   const editable = await editableSchemaReady(env);
   const source = validateSource(body.sourceUrl, env, new URL(request.url).origin, true);
@@ -203,6 +217,10 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   let workspace: unknown;
   try { workspace = validateSharedWorkspace(body.workspace); }
   catch { throw new ShareError(400, 'INVALID_WORKSPACE', 'The workspace contains unsupported, invalid or local-only data.'); }
+  if (!includeWorkspace) {
+    const state = workspace as any;
+    workspace = {schemaVersion:1,modelMatrix:state.modelMatrix,coordinateSystem:state.coordinateSystem,objects:[],groups:[]};
+  }
   const snapshot = JSON.stringify(workspace);
   if (encoder.encode(snapshot).length > MAX_WORKSPACE_BYTES) throw new ShareError(413, 'WORKSPACE_TOO_LARGE', 'The workspace metadata is too large to share.');
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -223,6 +241,7 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
       SELECT ?,1,? WHERE EXISTS(SELECT 1 FROM shares WHERE token_hash=?)
       ON CONFLICT(bucket) DO UPDATE SET count=count+1`).bind(daily,now + 2 * DAY,hash),
     ...(editable ? [env.SHARES_DB!.prepare('UPDATE shares SET label=?,updated_at=?,view_token_ciphertext=? WHERE token_hash=?').bind(label,now,viewCiphertext,hash)] : []),
+    ...(history ? [env.SHARES_DB!.prepare('UPDATE shares SET include_workspace=?,editing_enabled=? WHERE token_hash=?').bind(includeWorkspace?1:0,includeWorkspace?1:0,hash)] : []),
   ]);
   if (!results[0]?.meta?.changes) throw new ShareError(429, 'SHARE_LIMIT', 'The share creation quota is full. Try later or contact the platform owner.');
   return json({ url: new URL(`/s/${token}`, request.url).href, token, expiresAt: new Date(expires).toISOString(),revision:1,editingAvailable:editable }, 201);
@@ -238,7 +257,7 @@ async function loadRecord(token: string, env: ShareEnvironment, now: number): Pr
     || !['stl','3mf','glb'].includes(result.model_extension) || !TOKEN.test(result.model_identity)) {
     throw new ShareError(404, 'SHARE_UNAVAILABLE', 'This share is unavailable or has expired.');
   }
-  return {...result,role:result.token_hash===hash?'view':'edit'};
+  return {...result,role:result.token_hash===hash||result.auth_epoch!==undefined?'view':'edit'};
 }
 function workspaceLabel(value: unknown): string {
   if (typeof value !== 'string' || value.length > 128 || /[\u0000-\u001f\u007f]/.test(value)) throw new ShareError(400,'LABEL_INVALID','Use a workspace label of at most 128 characters.');
@@ -253,6 +272,7 @@ function requestFields(body: any, allowed: string[]): void {
 }
 async function saveWorkspace(request: Request, record: ShareRecord, env: ShareEnvironment, now: number): Promise<Response> {
   await requireEditableSchema(env);
+  if (await historySchemaReady(env)) return saveHistory(request,record,env,now);
   if (record.role !== 'edit') throw new ShareError(403,'VIEW_ONLY','This is a view-only link. Ask its owner for an authorized edit link.');
   const body = await readJson(request) as any;
   requestFields(body,['workspace','modelIdentity','revision']);
@@ -273,6 +293,7 @@ async function adminRecord(id: string, env: ShareEnvironment, now: number): Prom
   return record;
 }
 async function issueEditLink(request: Request, record: ShareRecord, env: ShareEnvironment, now: number, knownViewToken?: string): Promise<Response> {
+  if (await historySchemaReady(env)) throw new ShareError(409,'EDIT_LINK_RETIRED','Use the public workspace URL. Editing is controlled by its administrator.');
   // Caller must authenticate the creator password for each issuance/retrieval.
   let token: string;
   if (record.edit_token_ciphertext && record.edit_token_hash) {
@@ -298,9 +319,11 @@ async function listWorkspaces(request: Request, env: ShareEnvironment): Promise<
   if (cursor && (!match || !Number.isSafeInteger(Number(match[1])))) throw new ShareError(400,'REQUEST_INVALID','Invalid management cursor.');
   const before = match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
   const afterId = match?.[2] || '';
+  const history = await historySchemaReady(env);
+  const accessFields = history ? ",'includeWorkspace',include_workspace,'editingEnabled',editing_enabled,'workspaceVersion',workspace_version" : '';
   const result = await env.SHARES_DB!.prepare(`SELECT json_group_array(json_object(
     'id',token_hash,'label',label,'format',model_extension,'createdAt',created_at,'updatedAt',COALESCE(updated_at,created_at),
-    'expiresAt',expires_at,'revokedAt',revoked_at,'revision',revision,'viewCiphertext',view_token_ciphertext)) AS items
+    'expiresAt',expires_at,'revokedAt',revoked_at,'revision',revision,'viewCiphertext',view_token_ciphertext${accessFields})) AS items
     FROM (SELECT * FROM shares WHERE created_at<? OR (created_at=? AND token_hash>?) ORDER BY created_at DESC,token_hash ASC LIMIT 26)`)
     .bind(before,before,afterId).first<{items:string}>();
   const rows = JSON.parse(result?.items || '[]') as any[];
@@ -320,19 +343,148 @@ async function listWorkspaces(request: Request, env: ShareEnvironment): Promise<
 async function updateWorkspaceSettings(request: Request, id: string, env: ShareEnvironment, now: number): Promise<Response> {
   const record = await adminRecord(id,env,now);
   const body = await readJson(request) as any;
-  requestFields(body,['revision','label','expiresAt']);
+  requestFields(body,['revision','label','expiresAt','editingEnabled']);
+  const history = await historySchemaReady(env);
+  if ((body.editingEnabled !== undefined) && !history) await requireHistorySchema(env);
+  if (body.editingEnabled !== undefined && typeof body.editingEnabled !== 'boolean') throw new ShareError(400,'REQUEST_INVALID','Choose public viewing or public editing.');
   const expected = revision(body.revision);
-  if (body.label === undefined && body.expiresAt === undefined) throw new ShareError(400,'REQUEST_INVALID','Provide a label or expiry change.');
+  if (body.label === undefined && body.expiresAt === undefined && body.editingEnabled === undefined) throw new ShareError(400,'REQUEST_INVALID','Provide a label or expiry change.');
   const label = body.label === undefined ? record.label || '' : workspaceLabel(body.label);
   let expiry = record.expires_at;
   if (body.expiresAt !== undefined) {
     expiry = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
     if (!Number.isSafeInteger(expiry) || expiry <= now || expiry > record.created_at+SHARE_LIFETIME_MS) throw new ShareError(400,'EXPIRY_INVALID','Expiry must be in the future and within 180 days of creation.');
   }
-  const result = await env.SHARES_DB!.prepare(`UPDATE shares SET label=?,expires_at=?,updated_at=?,revision=revision+1
-    WHERE token_hash=? AND revision=? AND expires_at>? AND revoked_at IS NULL`).bind(label,expiry,now,id,expected,now).run();
+  let securityFields = ''; const securityValues: unknown[] = [];
+  if(history && (body.editingEnabled !== undefined)) {
+    const enabled = body.editingEnabled ?? record.editing_enabled === 1;
+    if(enabled && !record.include_workspace) throw new ShareError(400,'REQUEST_INVALID','Model-only links cannot enable workspace editing.');
+    securityFields=',editing_enabled=?,auth_epoch=auth_epoch+1'; securityValues.push(enabled?1:0);
+  }
+  const result = await env.SHARES_DB!.prepare(`UPDATE shares SET label=?,expires_at=?,updated_at=?,revision=revision+1${securityFields}
+    WHERE token_hash=? AND revision=? AND expires_at>? AND revoked_at IS NULL`).bind(label,expiry,now,...securityValues,id,expected,now).run();
   if (!result.meta?.changes) throw new ShareError(409,'WORKSPACE_CONFLICT','The workspace changed or expired. Refresh before changing its settings.');
   return json({revision:expected+1,label,expiresAt:new Date(expiry).toISOString()});
+}
+async function limitedAttempts(request: Request, env: ShareEnvironment, now: number, purpose: string, limit: number, windowMs = 60_000): Promise<void> {
+  const ip = (request.headers.get('CF-Connecting-IP') || 'unknown').slice(0,64);
+  const key = await hashToken(`${env.SHARES_CREATE_KEY}:${purpose}:${ip}`);
+  const window = Math.floor(now/windowMs);
+  const result = await env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at) VALUES(?,1,?)
+    ON CONFLICT(bucket) DO UPDATE SET count=count+1 RETURNING count`).bind(`access:${key}:${window}`,(window+2)*windowMs).first<{count:number}>();
+  if(!result || result.count>limit)throw new ShareError(429,'RATE_LIMITED','Too many attempts. Try again later.');
+}
+function sharingUsername(value: unknown): string {
+  if(typeof value!=='string'||!/^[a-z][a-z0-9._-]{2,63}$/.test(value))throw new ShareError(400,'USERNAME_INVALID','Use a username of 3–64 lowercase letters, digits, dots, hyphens or underscores, starting with a letter.');
+  return value;
+}
+async function authenticateSharingUser(request: Request, name: unknown, password: unknown, env: ShareEnvironment, now: number): Promise<string> {
+  await limitedAttempts(request,env,now,'sharing-login',5);
+  // Use a fixed response for unknown, disabled and incorrect credentials.
+  const username=typeof name==='string'&&/^[a-z][a-z0-9._-]{2,63}$/.test(name)?name:'';
+  const user=username?await env.SHARES_DB!.prepare('SELECT id,password_salt,password_hash,active FROM share_users WHERE username=?').bind(username).first<{id:string;password_salt:string;password_hash:string;active:number}>():null;
+  if(user) {
+    const bucket=`sharer-login:${user.id}:${Math.floor(now/3_600_000)}`;
+    const result=await env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at) VALUES(?,1,?)
+      ON CONFLICT(bucket) DO UPDATE SET count=count+1 RETURNING count`).bind(bucket,now+7_200_000).first<{count:number}>();
+    if(!result||result.count>60)throw new ShareError(429,'RATE_LIMITED','Too many sharing sign-in attempts. Try later.');
+  }
+  // Do the same KDF for unknown users, limiting username timing disclosure.
+  const digest=await passwordDigest(validWorkspacePassword(password)?password:'invalid-password-placeholder',user?.password_salt||'invalid-user-salt',env.SHARES_ENCRYPTION_KEY!);
+  if(!user||!user.active||!validWorkspacePassword(password)||!equalDigest(digest,user.password_hash))throw new ShareError(401,'SHARE_PASSWORD_INVALID','The sharing username or password was not accepted.');
+  return user.id;
+}
+async function manageSharingUsers(request: Request, env: ShareEnvironment, now: number, id?: string): Promise<Response> {
+  if(!id&&request.method==='GET') {
+    const result=await env.SHARES_DB!.prepare(`SELECT json_group_array(json_object('id',id,'username',username,'active',active,'createdAt',created_at,'updatedAt',updated_at)) AS items
+      FROM (SELECT id,username,active,created_at,updated_at FROM share_users ORDER BY username LIMIT 50)`).first<{items:string}>();
+    return json({items:JSON.parse(result?.items||'[]')});
+  }
+  if((!id&&request.method==='POST')||(id&&request.method==='PATCH')) {
+    const body=await readJson(request) as any;requestFields(body,id?['password','active','updatedAt']:['username','password']);
+    if((!id||body.password!==undefined)&&!validWorkspacePassword(body.password))throw new ShareError(400,'PASSWORD_INVALID','Assign a sharing password of 12–128 characters.');
+    if(body.password!==undefined&&equalDigest(await hashToken(body.password),await hashToken(env.SHARES_CREATE_KEY!)))throw new ShareError(400,'PASSWORD_INVALID','Assign a sharing password different from the administrator password.');
+    if(body.active!==undefined&&typeof body.active!=='boolean')throw new ShareError(400,'REQUEST_INVALID','Choose active or disabled sharing access.');
+    const salt=body.password!==undefined?randomToken():null;
+    const digest=salt?await passwordDigest(body.password,salt,env.SHARES_ENCRYPTION_KEY!):null;
+    if(!id){
+      const username=sharingUsername(body.username),newId=randomToken();
+      const result=await env.SHARES_DB!.prepare(`INSERT INTO share_users(id,username,password_salt,password_hash,created_at,updated_at)
+        SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM share_users)<50 AND NOT EXISTS(SELECT 1 FROM share_users WHERE username=?)`)
+        .bind(newId,username,salt,digest,now,now,username).run();
+      if(!result.meta?.changes)throw new ShareError(409,'USER_CONFLICT','That username exists or the 50-user limit is full.');
+      return json({id:newId},201);
+    }
+    if(!Number.isSafeInteger(body.updatedAt)||body.updatedAt<0||(body.password===undefined&&body.active===undefined))throw new ShareError(400,'REQUEST_INVALID','Provide a password or permission change and the current update time.');
+    const result=await env.SHARES_DB!.prepare(`UPDATE share_users SET password_salt=COALESCE(?,password_salt),password_hash=COALESCE(?,password_hash),active=COALESCE(?,active),updated_at=MAX(?,updated_at+1) WHERE id=? AND updated_at=?`)
+      .bind(salt,digest,body.active===undefined?null:body.active?1:0,now,id,body.updatedAt).run();
+    if(!result.meta?.changes)throw new ShareError(409,'USER_CONFLICT','Sharing access changed. Refresh the user list before saving.');
+    return json({saved:true});
+  }
+  throw new ShareError(405,'METHOD_NOT_ALLOWED','This user management method is not supported.');
+}
+async function authorizePublicShare(request: Request, record: ShareRecord, env: ShareEnvironment, now: number, knownToken: string): Promise<Response> {
+  const body=await readJson(request) as any;requestFields(body,['username','password']);
+  await authenticateSharingUser(request,body.username,body.password,env,now);
+  let token=knownToken;
+  if(await hashToken(token)!==record.token_hash) {
+    if(!record.view_token_ciphertext)throw new ShareError(404,'SHARE_UNAVAILABLE','This older public address could not be recovered.');
+    token=await decryptSource(record.view_token_ciphertext,`view-token:${record.token_hash}`,env);
+    if(!TOKEN.test(token)||await hashToken(token)!==record.token_hash)throw new ShareError(404,'SHARE_UNAVAILABLE','The public address is unavailable.');
+  }
+  return json({url:new URL(`/s/${token}`,request.url).href});
+}
+async function saveHistory(request: Request, record: ShareRecord, env: ShareEnvironment, now: number): Promise<Response> {
+  if(!record.include_workspace || !record.editing_enabled)throw new ShareError(403,'VIEW_ONLY','Editing is disabled for this public workspace.');
+  await limitedAttempts(request,env,now,`save:${record.token_hash}`,30);
+  const body=await readJson(request) as any;requestFields(body,['workspace','modelIdentity','revision','author']);
+  const expected=revision(body.revision),author=revisionAuthor(body.author);
+  if(expected!==record.revision)throw new ShareError(409,'WORKSPACE_CONFLICT','This workspace changed. Review the latest saved version before saving.');
+  if(!author)throw new ShareError(400,'AUTHOR_INVALID','Enter a display name of 1–80 characters.');
+  if(body.modelIdentity!==record.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity changed. Reload before saving.');
+  let snapshot:string;
+  try{snapshot=JSON.stringify(validateSharedWorkspace(body.workspace));}catch{throw new ShareError(400,'INVALID_WORKSPACE','The workspace contains unsupported model/planning state.');}
+  const bytes=encoder.encode(snapshot).length,saveId=randomToken(),next=(record.workspace_version||1)+1;
+  const valid=`EXISTS(SELECT 1 FROM shares s WHERE s.token_hash=? AND s.revision=? AND s.editing_enabled=1 AND s.expires_at>? AND s.revoked_at IS NULL)`;
+  const args=[record.token_hash,expected,now];
+  // Snapshot insertion, CAS update and pruning commit as one D1 transaction.
+  const results=await env.SHARES_DB!.batch([
+    env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id)
+      SELECT token_hash,workspace_version,workspace_json,length(CAST(workspace_json AS BLOB)),'Previous saved state',COALESCE(updated_at,created_at),'baseline'
+      FROM shares WHERE token_hash=? AND NOT EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=?) AND ${valid}
+      AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+length(CAST(workspace_json AS BLOB))+?<=?`)
+      .bind(record.token_hash,record.token_hash,...args,bytes,HISTORY_BYTE_LIMIT),
+    env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id)
+      SELECT ?,?,?,?,?,?,? WHERE ${valid} AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND version=?)
+      AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+?<=?`)
+      .bind(record.token_hash,next,snapshot,bytes,author,now,saveId,...args,record.token_hash,next-1,bytes,HISTORY_BYTE_LIMIT),
+    env.SHARES_DB!.prepare(`UPDATE shares SET workspace_json=?,workspace_version=?,revision=revision+1,updated_at=?
+      WHERE token_hash=? AND revision=? AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`)
+      .bind(snapshot,next,now,record.token_hash,expected,record.token_hash,saveId),
+    env.SHARES_DB!.prepare(`DELETE FROM share_revisions WHERE token_hash=? AND version<=?
+      AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`).bind(record.token_hash,next-HISTORY_VERSION_LIMIT,record.token_hash,saveId),
+  ]);
+  if(!results[2]?.meta?.changes) {
+    const current=await adminRecord(record.token_hash,env,now);
+    if(current.revision!==expected)throw new ShareError(409,'WORKSPACE_CONFLICT','This workspace changed. Review the latest saved version before saving.');
+    throw new ShareError(507,'HISTORY_FULL','Workspace history storage is full. Contact the administrator. Your changes are still on this device.');
+  }
+  return json({revision:expected+1,workspaceVersion:next,updatedAt:new Date(now).toISOString(),expiresAt:new Date(record.expires_at).toISOString()});
+}
+async function revisionHistory(record: ShareRecord, env: ShareEnvironment, version?: number): Promise<Response> {
+  if(!record.include_workspace)throw new ShareError(404,'HISTORY_UNAVAILABLE','Model-only links have no workspace history.');
+  const currentVersion=record.workspace_version||1;
+  if(version!==undefined) {
+    const row=await env.SHARES_DB!.prepare('SELECT workspace_json,author,saved_at FROM share_revisions WHERE token_hash=? AND version=?').bind(record.token_hash,version).first<{workspace_json:string;author:string;saved_at:number}>();
+    const snapshot=row?.workspace_json || (version===currentVersion?record.workspace_json:null);
+    if(!snapshot)throw new ShareError(404,'REVISION_UNAVAILABLE','This version is unavailable or has been removed from history.');
+    return json({version,workspace:validateSharedWorkspace(JSON.parse(snapshot)),modelIdentity:record.model_identity,revision:record.revision,currentVersion,author:row?.author||'Original workspace',savedAt:row?.saved_at||record.updated_at||record.created_at});
+  }
+  const result=await env.SHARES_DB!.prepare(`SELECT json_group_array(json_object('version',version,'author',author,'savedAt',saved_at)) AS items
+    FROM (SELECT version,author,saved_at FROM share_revisions WHERE token_hash=? ORDER BY version DESC LIMIT 20)`).bind(record.token_hash).first<{items:string}>();
+  const items=JSON.parse(result?.items||'[]');
+  if(!items.length)items.push({version:currentVersion,author:'Original workspace',savedAt:record.updated_at||record.created_at});
+  return json({items,currentVersion,revision:record.revision,maxVersions:HISTORY_VERSION_LIMIT});
 }
 function safeModelHeaders(upstream: Response, ext: string): Headers {
   const headers = new Headers(protectedHeaders);
@@ -441,7 +593,44 @@ export function createShareWorker(dependencies: Dependencies = {}) {
         if (url.search && url.pathname !== '/api/shares/admin') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
         if (url.pathname === '/api/shares/config' && request.method === 'GET') {
           const enabled = await environmentReady(env);
-          return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),formats:['stl','3mf','glb']} : {enabled:false});
+          return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),...(await historySchemaReady(env)?{historyEnabled:true}:{}),formats:['stl','3mf','glb']} : {enabled:false});
+        }
+        if(url.pathname==='/api/shares/admin/users/disable-batch') {
+          if(request.method!=='POST')throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+          await authenticate(request,env);
+          if(!await environmentReady(env))throw new ShareError(503,'SHARING_DISABLED','Sharing is not configured.');
+          await requireHistorySchema(env);
+          const body=await readJson(request) as any;requestFields(body,['ids']);
+          if(!Array.isArray(body.ids)||body.ids.length<1||body.ids.length>50||body.ids.some((id:unknown)=>typeof id!=='string'||!TOKEN.test(id))||new Set(body.ids).size!==body.ids.length)throw new ShareError(400,'REQUEST_INVALID','Select 1–50 different sharing users.');
+          await env.SHARES_DB!.batch(body.ids.map((id:string)=>env.SHARES_DB!.prepare('UPDATE share_users SET active=0,updated_at=MAX(?,updated_at+1) WHERE id=?').bind(now(),id)));
+          return json({disabled:body.ids.length});
+        }
+        const userAdmin=/^\/api\/shares\/admin\/users(?:\/([a-f0-9]{64}))?$/.exec(url.pathname);
+        if(userAdmin){
+          await authenticate(request,env);
+          if(!await environmentReady(env))throw new ShareError(503,'SHARING_DISABLED','Sharing is not configured.');
+          await requireHistorySchema(env);
+          return await manageSharingUsers(request,env,now(),userAdmin[1]);
+        }
+        if(url.pathname === '/api/shares/admin/revoke-batch') {
+          if(request.method!=='POST') throw new ShareError(405,'METHOD_NOT_ALLOWED','This management method is not supported.');
+          await authenticate(request,env);
+          if(!await environmentReady(env))throw new ShareError(503,'SHARING_DISABLED','Sharing is not configured.');
+          await requireHistorySchema(env);
+          const body=await readJson(request) as any;requestFields(body,['ids']);
+          if(!Array.isArray(body.ids)||body.ids.length<1||body.ids.length>50||body.ids.some((id:unknown)=>typeof id!=='string'||!TOKEN.test(id))||new Set(body.ids).size!==body.ids.length)throw new ShareError(400,'REQUEST_INVALID','Select 1–50 different workspaces.');
+          await env.SHARES_DB!.batch(body.ids.map((id:string)=>env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=?,revision=revision+1,auth_epoch=auth_epoch+1 WHERE token_hash=? AND revoked_at IS NULL').bind(now(),id)));
+          return json({revoked:body.ids.length});
+        }
+        const historyRoute=/^\/api\/shares\/([a-f0-9]{64})\/(share-link|revisions)(?:\/([1-9][0-9]{0,9}))?$/.exec(url.pathname);
+        if(historyRoute) {
+          if((historyRoute[2]==='share-link' && (request.method!=='POST'||historyRoute[3]))||(historyRoute[2]==='revisions'&&request.method!=='GET'))throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+          if(!await environmentReady(env))throw new ShareError(503,'SHARING_DISABLED','Sharing is not configured.');
+          await requireHistorySchema(env);
+          const record=await loadRecord(historyRoute[1],env,now());
+          await rateLimit(request,env,now());
+          if(historyRoute[2]==='share-link')return await authorizePublicShare(request,record,env,now(),historyRoute[1]);
+          return await revisionHistory(record,env,historyRoute[3]?Number(historyRoute[3]):undefined);
         }
         const admin = /^\/api\/shares\/admin(?:\/([a-f0-9]{64})(?:\/(edit-link))?)?$/.exec(url.pathname);
         if (admin) {
@@ -501,7 +690,7 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           const viewToken=await decryptSource(record.view_token_ciphertext,`view-token:${record.token_hash}`,env);
           if(TOKEN.test(viewToken)&&await hashToken(viewToken)===record.token_hash)viewUrl=new URL(`/s/${viewToken}`,request.url).href;
         } catch { /* A missing old view address does not grant or remove edit access. */ }
-        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),role:record.role,revision:record.revision??1,...(viewUrl?{viewUrl}:{}) });
+        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),role:record.role,revision:record.revision??1,...(record.auth_epoch!==undefined?{historyEnabled:true,includeWorkspace:!!record.include_workspace,editingEnabled:!!record.editing_enabled,workspaceVersion:record.workspace_version??1}:{}),...(viewUrl?{viewUrl}:{}) });
       } catch (error) {
         if (error instanceof ShareError) return json({ error: { code:error.code,message:error.message } },error.status);
         // Never echo SQL, secrets, user annotations or upstream URL/error bodies.

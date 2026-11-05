@@ -10,7 +10,7 @@ unit test is not described as complete runtime acceptance.
 
 ## Protected-workspace extension
 
-The test branch adds self-contained Dropbox 3MF/GLB sharing alongside STL, per-mesh visibility/opacity, explicit revision-checked saves through separate edit links, creator-password authorization for edit-link sharing, and `/admin/shares` for labels, bounded expiry and revocation. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for the additive D1 migration and phone setup.
+The test branch supports self-contained Dropbox STL/3MF/GLB sharing with concealed sources, a model-only/workspace checkbox, named saved versions and explicit revision-checked public saves. Admin credentials are administration-only; admins assign sharing users and individual passwords. `/admin/shares` manages users, public editing permission, expiry and batch link revocation. Schema 3 is required for this flow; prior view addresses remain compatible. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for the additive D1 migration and phone setup.
 
 Local SQLite-backed tests cover permissions, save races, migration compatibility, pagination and expiry. A real local Worker/D1/Chromium check covers admin login, fresh-password authorization, edit saves, conflicts, labels, expiry cap, revocation and no persistent credentials. Package tests cover multi-object 3MF, unsafe references/entities and actual expanded-byte limits. Physical-device 3MF rendering/state acceptance and the Slicer gates below remain required.
 

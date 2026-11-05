@@ -20,12 +20,20 @@ const shareDownloadErrors: Record<string, string> = {
   RATE_LIMITED: 'Too many share requests. Try again shortly.',
   SHARING_DISABLED: 'Shared workspaces are temporarily unavailable. Try again later.',
   SHARING_UNAVAILABLE: 'Shared workspaces are temporarily unavailable. Try again later.',
-  VIEW_ONLY: 'This is a view-only link. Ask its owner for an authorized edit link.',
+  VIEW_ONLY: 'Saving changes is disabled for this public workspace by its administrator.',
   WORKSPACE_CONFLICT: 'Someone else changed this workspace, or the link expired. Export your changes as a backup, then reload before saving again.',
   MODEL_CHANGED: 'The model identity does not match this workspace. Reload the protected link before saving.',
   UPGRADE_REQUIRED: 'Editing and management need the editable-workspace database migration. Contact the platform owner.',
-  UNAUTHORIZED: 'The creator password was not accepted.',
+  UNAUTHORIZED: 'The administrator password was not accepted.',
   EXPIRY_INVALID: 'Expiry must be in the future and no later than 180 days after creation.',
+  SHARE_PASSWORD_INVALID: 'The sharing username or password was not accepted.',
+  EDIT_SESSION_INVALID: 'Your editing session expired or permissions changed. Unlock editing again.',
+  PASSWORD_INVALID: 'Choose a sharing password of 12–128 characters.',
+  AUTHOR_INVALID: 'Enter a display name of 1–80 characters.',
+  USERNAME_INVALID: 'Use a username of 3–64 lowercase letters, digits, dots, hyphens or underscores, starting with a letter.',
+  USER_CONFLICT: 'That sharing user changed or the username already exists. Refresh the sharing user list.',
+  HISTORY_FULL: 'History storage is full. Your changes remain on this device; contact the administrator.',
+  REVISION_UNAVAILABLE: 'That saved version is no longer available.',
   INVALID_WORKSPACE: 'This workspace contains invalid or unsupported model/planning data.',
 };
 
@@ -37,6 +45,10 @@ export interface SharedWorkspaceResponse {
   role: 'view' | 'edit';
   revision: number;
   viewUrl?: string;
+  historyEnabled?: boolean;
+  includeWorkspace?: boolean;
+  editingEnabled?: boolean;
+  workspaceVersion?: number;
 }
 
 function abortIfNeeded(signal?: AbortSignal): void {
@@ -125,6 +137,7 @@ export function validateShareResponse(value: unknown, token: string, origin: str
     modelIdentity: data.modelIdentity!,
     modelUrl: protectedModelPath(token, data.modelUrl, origin),
     expiresAt: data.expiresAt, role, revision,
+    ...(data.historyEnabled === true ? {historyEnabled:true,includeWorkspace:data.includeWorkspace===true,editingEnabled:data.editingEnabled===true,workspaceVersion:validVersion(data.workspaceVersion)} : {}),
     ...(data.viewUrl !== undefined ? {viewUrl:protectedWorkspaceUrl(data.viewUrl,origin)} : {}),
   };
 }
@@ -169,19 +182,19 @@ export async function loadSharedModel(
   return { metadata, file: new File([modelBytes], `shared-model.${extension}`, { type: 'application/octet-stream' }) };
 }
 
-export async function createProtectedShare(input: { sourceUrl: string; workspace: unknown; modelIdentity: string; label?: string }, creatorKey: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
+export async function createProtectedShare(input: { sourceUrl: string; workspace: unknown; modelIdentity: string; label?: string; includeWorkspace?: boolean; sharingUsername?: string }, sharingPassword: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
   if (!IDENTITY.test(input.modelIdentity)) throw new Error('Reload this model from its original URL before creating a protected share.');
-  if (creatorKey.length < 32) throw new Error('Enter the authorized share-creation key.');
+  if (input.includeWorkspace !== false && (!input.sharingUsername || sharingPassword.length < 12 || sharingPassword.length>128)) throw new Error('Enter your assigned sharing username and password.');
   const workspace = validateSharedWorkspace(input.workspace);
   const response = await fetch('/api/shares', {
     method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creatorKey}` },
-    body: JSON.stringify({ sourceUrl: input.sourceUrl, workspace, modelIdentity: input.modelIdentity, ...(input.label !== undefined ? {label:input.label} : {}) })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceUrl: input.sourceUrl, workspace, modelIdentity: input.modelIdentity, ...(input.label !== undefined ? {label:input.label} : {}),...(input.includeWorkspace !== undefined?{includeWorkspace:input.includeWorkspace}:{}),...(input.includeWorkspace!==false?{sharingUsername:input.sharingUsername,sharingPassword}:{}) })
   });
   if (!response.ok) {
     const errors: Record<number, string> = {
       400: 'Use a self-contained Dropbox STL, 3MF or GLB model without local custom meshes.',
-      401: 'The share-creation key was not accepted.', 403: 'Share creation is not permitted.',
+      401: 'The sharing username or password was not accepted.', 403: 'Share creation is not permitted.',
       413: 'The planning workspace is too large to share as metadata.', 429: 'The sharing limit was reached. Try again later.',
       503: 'Protected sharing has not been configured for this environment.'
     };
@@ -210,10 +223,10 @@ export async function requestEditWorkspaceLink(path: string, password: string, s
   return protectedWorkspaceUrl(data.url);
 }
 
-export async function saveProtectedWorkspace(token: string, data: {workspace:unknown;modelIdentity:string;revision:number}, signal: AbortSignal): Promise<{revision:number;updatedAt:string;expiresAt:string}> {
+export async function saveProtectedWorkspace(token: string, data: {workspace:unknown;modelIdentity:string;revision:number;author?:string}, signal: AbortSignal, editSession?:string): Promise<{revision:number;updatedAt:string;expiresAt:string;workspaceVersion?:number}> {
   if (!TOKEN.test(token) || !IDENTITY.test(data.modelIdentity) || !Number.isSafeInteger(data.revision) || data.revision < 1) throw new Error('The shared workspace save state is invalid.');
   const workspace = validateSharedWorkspace(data.workspace);
-  const response = await fetch(`/api/shares/${token}`,{method:'PUT',credentials:'omit',cache:'no-store',redirect:'error',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,workspace})});
+  const response = await fetch(`/api/shares/${token}`,{method:'PUT',credentials:'omit',cache:'no-store',redirect:'error',signal,headers:{'Content-Type':'application/json',...(editSession?{Authorization:`Bearer ${editSession}`}:{})},body:JSON.stringify({...data,workspace})});
   if (!response.ok) throw await shareDownloadError(response,signal);
   const result = JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,8192,signal)));
   if (result.revision !== data.revision+1 || !Number.isFinite(Date.parse(result.updatedAt)) || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('The save service returned invalid revision metadata. Reload before saving again.');
@@ -258,4 +271,33 @@ export function beginSharedModelImport(manager: any, file: File, checkpoint: Ret
       if (manager.modelLoadState.requestId !== requestId) throw new Error('A newer model load replaced this shared workspace.');
     })
   };
+}
+
+function validVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number)<1 || (value as number)>2_147_483_646) throw new Error('Invalid saved workspace version.');
+  return value as number;
+}
+async function historyRequest(token:string,suffix:string,signal:AbortSignal,password?:string,username?:string):Promise<any> {
+  if(!TOKEN.test(token))throw new Error('Invalid workspace address.');
+  const response=await fetch(`/api/shares/${token}/${suffix}`,{method:password===undefined?'GET':'POST',signal,credentials:'omit',cache:'no-store',redirect:'error',...(password!==undefined?{headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})}:{})});
+  if(!response.ok)throw await shareDownloadError(response,signal);
+  return JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,280*1024,signal)));
+}
+export async function authorizePublicWorkspaceShare(token:string,username:string,password:string,signal:AbortSignal):Promise<string> {
+  if(!/^[a-z][a-z0-9._-]{2,63}$/.test(username)||password.length<12||password.length>128)throw new Error('Enter the authorized sharing password.');
+  const data=await historyRequest(token,'share-link',signal,password,username);
+  return protectedWorkspaceUrl(data.url);
+}
+export interface WorkspaceHistoryItem {version:number;author:string;savedAt:number}
+export async function listWorkspaceHistory(token:string,signal:AbortSignal):Promise<{items:WorkspaceHistoryItem[];currentVersion:number;revision:number}> {
+  const data=await historyRequest(token,'revisions',signal);
+  validVersion(data.currentVersion);validVersion(data.revision);
+  if(!Array.isArray(data.items)||data.items.length>20||data.items.some((item:any)=>!Number.isSafeInteger(item.version)||item.version<1||item.version>data.currentVersion||typeof item.author!=='string'||item.author.length>80||!Number.isSafeInteger(item.savedAt)))throw new Error('Invalid workspace history.');
+  return data;
+}
+export async function loadWorkspaceVersion(token:string,version:number,identity:string,signal:AbortSignal):Promise<{workspace:SharedPlanningWorkspace;revision:number;currentVersion:number}> {
+  validVersion(version);
+  const data=await historyRequest(token,`revisions/${version}`,signal);
+  if(data.version!==version||data.modelIdentity!==identity)throw new Error('This version belongs to a different model.');
+  return {workspace:validateSharedWorkspace(data.workspace),revision:validVersion(data.revision),currentVersion:validVersion(data.currentVersion)};
 }

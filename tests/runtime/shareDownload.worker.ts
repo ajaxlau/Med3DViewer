@@ -1,4 +1,5 @@
 import { createShareWorker, hashToken, SHARE_LIFETIME_MS, type ShareEnvironment, type ShareDatabase } from '../../worker/index';
+import { passwordDigest, equalDigest } from '../../worker/workspaceAccess';
 
 const contents = 'solid synthetic\nendsolid synthetic';
 const token = 'ab'.repeat(32);
@@ -67,3 +68,8 @@ export const get = { async test() { await download(); } };
 export const head = { async test() { await download('HEAD'); } };
 export const range = { async test() { await download('GET', 'bytes=0-4'); } };
 export const redirect = { async test() { await download('GET', undefined, true); } };
+export const password = { async test() {
+  const digest=await passwordDigest('synthetic-workspace-password','synthetic-salt','synthetic-pepper');
+  check(equalDigest(digest,await passwordDigest('synthetic-workspace-password','synthetic-salt','synthetic-pepper')),'Password verification failed');
+  check(!equalDigest(digest,await passwordDigest('wrong-workspace-password','synthetic-salt','synthetic-pepper')),'Wrong password accepted');
+} };

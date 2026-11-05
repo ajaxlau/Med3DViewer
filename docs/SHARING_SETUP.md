@@ -2,7 +2,7 @@
 
 This draft adds D1 metadata and a streaming Worker, **not model storage**. Start on the test Worker below. Do not change the existing production Worker or merge the PR to beta until acceptance is reviewed. The ordinary root configuration leaves protected sharing disabled.
 
-The approved test policy is Dropbox-only, one private creator password, separate view/edit links, and a maximum of 180 days from creation. Protected sharing supports self-contained STL, 3MF and GLB files; local custom meshes cannot be included in shared JSON. Editing, per-mesh state, the admin page and the additive D1 upgrade are covered in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Large-model reduction is still a feasibility gate, not enabled automatically.
+The current policy is Dropbox-only, public source-concealing links and a maximum of 180 days from creation. The admin password is administration-only; admins assign individual sharing usernames/passwords. Recipients never need passwords. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for checkbox behavior, saved revision history and the schema-3 upgrade. Protected sharing supports self-contained STL, 3MF and GLB files; local custom meshes cannot be included in shared JSON. Editing, per-mesh state, the admin page and the additive D1 upgrade are covered in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Large-model reduction is still a feasibility gate, not enabled automatically.
 
 ## Resource map
 
@@ -20,7 +20,7 @@ Each database gets the same schema, a different UUID, and its own scope row. Bot
 
 Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. The owner-provided test ID `5645e9dd-918f-4bbc-a0d6-9e1c315c27ca` is recorded in [config/shares.test.json](../config/shares.test.json). It is used only by the dedicated test target. Beta/main have no database defaults. Do not send any password/API token in chat.
 
-For a new database, open its **Console** and execute [0001_shares.sql](../migrations/0001_shares.sql), followed by [0002_editable_workspaces.sql](../migrations/0002_editable_workspaces.sql), then run:
+For a new database, open its **Console** and execute [0001_shares.sql](../migrations/0001_shares.sql), followed by [0002_editable_workspaces.sql](../migrations/0002_editable_workspaces.sql) and [0003_public_workspace_history.sql](../migrations/0003_public_workspace_history.sql), then run:
 
 ```sql
 INSERT INTO share_environment (id, scope) VALUES (1, 'test');
@@ -96,9 +96,9 @@ This error means bundling exceeded the build machine's file-descriptor limit, fo
 
 Use a synthetic/de-identified **Dropbox STL, 3MF or GLB**. Load it through the existing URL dialog; wait for ready. Set mesh visibility/opacity, create analytic objects and annotations, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected view link.
 
-Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm meshes, visibility, opacity, annotations and analytic objects restore; copied/QR addresses contain no Dropbox URL. View recipients cannot save to D1. Use **Authorize sharing an edit link…**, enter the creator password again, then test explicit Save, conflicts and the admin page as described in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Verify refresh, early revocation, mobile orientation, cancellation and source-unavailable behavior using [TESTING.md](TESTING.md).
+Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm meshes, visibility, opacity, annotations and analytic objects restore; copied/QR addresses contain no Dropbox URL. For workspace links, recipients may explicitly Save when public editing is enabled. The sharer uses assigned user credentials; the admin password is not accepted for sharing. Test version selection, explicit Save, conflicts and the admin page as described in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Verify refresh, early revocation, mobile orientation, cancellation and source-unavailable behavior using [TESTING.md](TESTING.md).
 
-The creator key is memory-only and cleared when the dialog closes; shared snapshots are not auto-saved to recipient localStorage. A bearer link can be forwarded. Expiry cannot recall already downloaded/rendered data. The model must remain available at Dropbox; a changed file is rejected before its old workspace is applied, although changed bytes may already have been streamed to the browser.
+Entered sharing credentials are memory-only and cleared when the dialog closes; shared snapshots are not auto-saved to recipient localStorage. A bearer link can be forwarded. Expiry cannot recall already downloaded/rendered data. The model must remain available at Dropbox; a changed file is rejected before its old workspace is applied, although changed bytes may already have been streamed to the browser.
 
 ### Dropbox downloads but the protected link fails
 

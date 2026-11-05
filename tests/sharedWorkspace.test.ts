@@ -120,20 +120,30 @@ test('malformed or oversized error responses cancel safely and show only a fixed
   }
 });
 
-test('share creation authenticates with a header and excludes creator key from JSON/address', async t => {
+test('workspace creation sends assigned sharing credentials only in the request, never in the address', async t => {
   const key = 'synthetic-test-key-'.repeat(3);
   const currentOrigin = window.location.origin;
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     assert.equal(url, '/api/shares');
     assert.equal(init.method, 'POST');
-    assert.equal((init.headers as Record<string, string>).Authorization, `Bearer ${key}`);
-    assert.equal(String(init.body).includes(key), false);
+    assert.equal((init.headers as Record<string, string>).Authorization, undefined);
+    assert.equal(JSON.parse(String(init.body)).sharingUsername, 'test.sharer');
+    assert.equal(JSON.parse(String(init.body)).sharingPassword, key);
     assert.equal(String(init.body).includes('fileDataURL'), false);
     return new Response(JSON.stringify({ token, url: `${currentOrigin}/s/${token}`, expiresAt: '2099-01-01T00:00:00.000Z' }), { status: 201 });
   });
-  const result = await createProtectedShare({ sourceUrl: 'https://models.example/model.stl', workspace, modelIdentity: 'b'.repeat(64) }, key, new AbortController().signal);
+  const result = await createProtectedShare({ sourceUrl: 'https://dl.dropboxusercontent.com/model.stl', workspace, modelIdentity: 'b'.repeat(64), sharingUsername:'test.sharer',includeWorkspace:true }, key, new AbortController().signal);
   assert.equal(result.url, `${currentOrigin}/s/${token}`);
   assert.equal(result.url.includes(key), false);
+});
+test('model-only sharing excludes sharing credentials and uses a concealed public address',async t=>{
+  t.mock.method(globalThis,'fetch',async(_path:string,init:RequestInit)=>{
+    const body=JSON.parse(String(init.body));assert.equal(body.includeWorkspace,false);assert.equal(body.sharingPassword,undefined);assert.equal(body.sharingUsername,undefined);
+    assert.equal((init.headers as any).Authorization,undefined);
+    return new Response(JSON.stringify({token,url:`${window.location.origin}/s/${token}`,expiresAt:'2099-01-01T00:00:00.000Z'}),{status:201});
+  });
+  const result=await createProtectedShare({sourceUrl:'https://dl.dropboxusercontent.com/model.3mf',workspace,modelIdentity:'b'.repeat(64),includeWorkspace:false,sharingUsername:'must-not-send'},'must-not-send-this-password',new AbortController().signal);
+  assert(!result.url.includes('dropbox'));assert(!result.url.includes('password'));
 });
 
 test('superseded or cancelled model imports cannot receive an old snapshot', async () => {

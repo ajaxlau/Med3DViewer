@@ -80,8 +80,9 @@ function MainLayout() {
             viewerManager.loadedModelIdentity = metadata.modelIdentity;
             viewerManager.sharedWorkspaceExpiresAt = metadata.expiresAt;
             viewerManager.sharedWorkspaceRole = metadata.role;
+            viewerManager.sharedWorkspaceIncludesPlanning = metadata.includeWorkspace !== false;
             viewerManager.sharedWorkspaceViewUrl = metadata.viewUrl ?? (metadata.role==='view'?`${window.location.origin}/s/${token}`:null);
-            setSharedSession({token,role:metadata.role,revision:metadata.revision,modelIdentity:metadata.modelIdentity,requestId:importId!,expiresAt:metadata.expiresAt});
+            setSharedSession({token,role:metadata.role,revision:metadata.revision,historyEnabled:metadata.historyEnabled,includeWorkspace:metadata.includeWorkspace,editingEnabled:metadata.editingEnabled,workspaceVersion:metadata.workspaceVersion,modelIdentity:metadata.modelIdentity,requestId:importId!,expiresAt:metadata.expiresAt});
             viewerManager.config.onStatusChange('Shared workspace loaded.', false, file.name, metadata.modelUrl);
             setSharedNotice(null);
           } catch (error) {

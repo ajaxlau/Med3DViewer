@@ -22,6 +22,7 @@ export async function cleanupExpiredShares(env: CleanupEnvironment, timestamp = 
     if ((result.meta?.changes || 0) < 100) break;
   }
   await env.SHARES_DB!.prepare('DELETE FROM share_rate_limits WHERE bucket IN (SELECT bucket FROM share_rate_limits WHERE expires_at<=? LIMIT 1000)').bind(timestamp).run();
+
 }
 
 export default {

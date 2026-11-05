@@ -25,3 +25,12 @@ Recorded 4 November 2026. This evidence is for the draft implementation, not a c
 Before beta merge, complete the isolated Cloudflare/Dropbox test in [SHARING_SETUP.md](SHARING_SETUP.md), browser and actual 3D Slicer checks in [TESTING.md](TESTING.md), and physical-device acceptance. Any additional application-level Slicer/browser evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Do not infer those results from helper tests.
 
 At that initial stage, protected sharing was limited to Dropbox STL with procedural planning objects. Custom/local models, full model copies, automatic decimation, interruptible parser workers, wholesale asynchronous storage migration and replacement of the continuous overlay loop remain outside the completed scope.
+
+
+## Public workspace revisions and assigned sharing users (5 November 2026)
+
+- Node 22 SQLite-backed tests cover model-only sanitization, admin/sharer separation, individual password assignment/rotation, user disable, public recipient saves, immutable named revisions, concurrent-save conflicts, permission changes, bounded history, expiry and batch revocation.
+- Actual workerd tests cover GET/HEAD/Range/Dropbox redirects plus salted, peppered PBKDF2 password verification without outbound network access.
+- Local Chromium at 390×844 against a real local Worker/D1 passed admin login, sharing-user creation/password rotation/batch disable, public recipient saves without a password, no auto-save, version selection, stale conflicts, exact expiry preservation, expiry maximum, batch link revocation, scrolling and no persistent credentials. The recipient component used a synthetic model-state harness; this did not validate real 3MF parsing, physical device GPU behavior or Slicer interoperability. Service workers were blocked in this isolated browser harness.
+- The Vite/PWA artifact builds with a 256 open-file limit. No geometry copies or additional package dependencies were introduced.
+- Live Workers requests from the automation runner may still return Cloudflare error 1010; local checks do not establish remote acceptance. Test D1 migration 0003 and owner acceptance are required before beta/main promotion.
