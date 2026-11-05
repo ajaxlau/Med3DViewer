@@ -44,8 +44,10 @@ jobs:
       - name: Test Worker downloads in the Cloudflare runtime
         run: node scripts/test-worker-runtime.mjs
 
-      - name: Build the Cloudflare Workers artifact
-        run: npm run build:cloudflare
+      - name: Build the Cloudflare Workers artifact with a low open-file limit
+        run: |
+          ulimit -n 256
+          npm run build:cloudflare
 
       - name: Validate Worker packaging without publishing
         run: npm run check:cloudflare

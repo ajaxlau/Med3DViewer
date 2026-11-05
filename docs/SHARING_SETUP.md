@@ -86,6 +86,10 @@ The PWA must not serve its offline app shell for `/api` navigation requests. The
 
 If a fresh private window shows JSON, the address/backend route is reachable. `{"enabled":false}` then means the binding/scope/runtime variables or secrets still need checking. If the app page still appears even in a fresh private window, inspect the deployed commit and confirm the deploy command is `npm run deploy:shares:test`, with a Worker entry point and `assets.run_worker_first` covering `/api/shares/*`. Do not treat an HTML app-shell response as a database or secret failure.
 
+### Build fails with `EMFILE: too many open files`
+
+This error means bundling exceeded the build machine's file-descriptor limit, for example while reading the Lucide icon modules. Vite's Rollup configuration limits parallel file operations to 32. CI builds the complete app and PWA with a 256-file soft limit to guard against this failure. Keep the Cloudflare build command `npm run build:cloudflare`; the limit is in the repository configuration and requires no dashboard variable or database changes.
+
 ### 4. Test the existing Share workflow
 
 Use a synthetic/de-identified **Dropbox STL** first. Load it through the existing URL dialog; wait for ready. Create a distance, angle, point, plane/curve and annotation, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected link.

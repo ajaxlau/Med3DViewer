@@ -8,6 +8,13 @@ import { navigationFallbackDenylist } from './src/lib/serviceWorkerPolicy';
 export default defineConfig(() => {
   return {
     base: '/',
+    build: {
+      rollupOptions: {
+        // Large icon/module graphs can exceed Workers Builds' open-file limit.
+        // Bound concurrent reads/writes instead of relying on the host's ulimit.
+        maxParallelFileOps: 32,
+      },
+    },
     plugins: [
       react(), 
       tailwindcss(),
