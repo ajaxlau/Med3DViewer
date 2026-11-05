@@ -13,6 +13,8 @@ CREATE TABLE share_revisions (
   save_id TEXT NOT NULL,
   PRIMARY KEY(token_hash,version)
 );
+-- Keep global quota checks on a small covering index, without scanning snapshots.
+CREATE INDEX share_revisions_byte_ledger ON share_revisions(byte_count);
 CREATE TABLE share_users (
   id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=64),
   username TEXT UNIQUE NOT NULL CHECK(length(username) BETWEEN 3 AND 64),
