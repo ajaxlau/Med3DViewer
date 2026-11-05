@@ -1,10 +1,18 @@
 // Shared planning records contain procedural definitions, never model bytes.
 export interface SharedPlanningWorkspace {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   coordinateSystem: { systemType: 'Viewer world with recorded model root'; units: 'millimeters (mm)' };
   modelMatrix: number[];
   objects: Record<string, any>[];
   groups: Record<string, any>[];
+  meshes?: SharedMeshState[];
+}
+export interface SharedMeshState {
+  key: string;
+  vertices: number;
+  indices: number;
+  visible: boolean;
+  opacity: number;
 }
 
 export const MAX_SHARED_WORKSPACE_BYTES = 256 * 1024;
@@ -74,8 +82,8 @@ export function transformedAngle(p1: any, vertex: any, p3: any, matrix: number[]
 
 export function validateSharedWorkspace(input: unknown): SharedPlanningWorkspace {
   const source = record(input, 'Workspace');
-  keys(source, ['schemaVersion', 'coordinateSystem', 'modelMatrix', 'objects', 'groups'], 'Workspace');
-  if (source.schemaVersion !== 1) throw new Error('Unsupported shared workspace version.');
+  if (![1, 2].includes(source.schemaVersion)) throw new Error('Unsupported shared workspace version.');
+  keys(source, ['schemaVersion', 'coordinateSystem', 'modelMatrix', 'objects', 'groups', ...(source.schemaVersion === 2 ? ['meshes'] : [])], 'Workspace');
   keys(source.coordinateSystem, ['systemType', 'units'], 'Coordinate system');
   if (source.coordinateSystem.systemType !== 'Viewer world with recorded model root'
     || source.coordinateSystem.units !== 'millimeters (mm)') throw new Error('Unsupported workspace coordinate system or units.');
@@ -147,9 +155,24 @@ export function validateSharedWorkspace(input: unknown): SharedPlanningWorkspace
   });
   if (pointCount > 4096) throw new Error('Workspace control-point limit exceeded.');
   const result: SharedPlanningWorkspace = {
-    schemaVersion: 1, modelMatrix: matrix(source.modelMatrix, 'Model matrix'),
+    schemaVersion: source.schemaVersion, modelMatrix: matrix(source.modelMatrix, 'Model matrix'),
     coordinateSystem: { systemType: 'Viewer world with recorded model root', units: 'millimeters (mm)' }, objects, groups,
   };
+  if (source.schemaVersion === 2) {
+    if (!Array.isArray(source.meshes) || source.meshes.length > 2048) throw new Error('Invalid or oversized model mesh state.');
+    const meshKeys = new Set<string>();
+    result.meshes = source.meshes.map(raw => {
+      keys(raw, ['key', 'vertices', 'indices', 'visible', 'opacity'], 'Model mesh state');
+      const key = text(raw.key, 'Model mesh key', 512);
+      if (!/^(?:root|\d+(?:\.\d+)*)$/.test(key) || meshKeys.has(key)) throw new Error('Model mesh keys must be unique scene paths.');
+      meshKeys.add(key);
+      if (typeof raw.visible !== 'boolean') throw new Error('Model mesh visibility must be boolean.');
+      for (const field of ['vertices', 'indices']) if (!Number.isSafeInteger(raw[field]) || raw[field] < 0 || raw[field] > 300_000_000) throw new Error('Invalid model mesh shape.');
+      const opacity = finite(raw.opacity, 'Model mesh opacity', 1);
+      if (opacity < 0) throw new Error('Model mesh opacity must be between zero and one.');
+      return { key, vertices: raw.vertices, indices: raw.indices, visible: raw.visible, opacity };
+    });
+  }
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_SHARED_WORKSPACE_BYTES) throw new Error('Shared workspace exceeds the 256 KiB limit.');
   return result;
 }

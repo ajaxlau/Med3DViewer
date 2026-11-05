@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   beginSharedModelImport, captureModelLoad, createProtectedShare, loadSharedModel, protectedModelPath, readBoundedBytes,
   sha256Hex, tokenFromSharePath, validateShareResponse, waitForSharedModelReady,
+  requestEditWorkspaceLink, saveProtectedWorkspace,
 } from '../src/lib/sharedWorkspace.ts';
 
 const token = 'a'.repeat(64);
@@ -27,7 +28,7 @@ test('protected model reference must stay on the same origin and token, without 
   for (const url of [
     'https://source.example/model.stl', `https://user:pass@viewer.example/api/shares/${token}/model.stl`,
     `/api/shares/${'b'.repeat(64)}/model.stl`, `/api/shares/${token}/model.stl?url=secret`,
-    `/api/shares/${token}/model.stl#secret`, `/api/shares/${token}/model.glb`,
+    `/api/shares/${token}/model.stl#secret`, `/api/shares/${token}/model.obj`,
   ]) assert.throws(() => protectedModelPath(token, url, origin));
 });
 
@@ -156,7 +157,8 @@ test('shared import captures its own request before awaiting asynchronous file v
   const manager = {
     modelLoadState: { requestId: null, phase: 'idle' },
     loadFiles(_files, options) {
-      assert.deepEqual(options, { shared: true });
+      assert.equal(options.shared, true);
+      assert(options.signal instanceof AbortSignal);
       this.modelLoadState = { requestId: 'shared', phase: 'validating' };
       return new Promise<void>(resolve => { finish = resolve; });
     }
@@ -166,4 +168,33 @@ test('shared import captures its own request before awaiting asynchronous file v
   manager.modelLoadState = { requestId: 'newer', phase: 'ready' };
   finish!();
   await assert.rejects(job.completion, /newer model/);
+});
+
+test('3MF/GLB references stay same-origin and access metadata cannot elevate an invalid role',()=>{
+  for(const extension of ['3mf','glb'])assert.equal(protectedModelPath(token,`/api/shares/${token}/model.${extension}`,origin),`${origin}/api/shares/${token}/model.${extension}`);
+  const editable=validateShareResponse({...metadata(),role:'edit',revision:3,viewUrl:`${origin}/s/${'c'.repeat(64)}`},token,origin);
+  assert.equal(editable.role,'edit');assert.equal(editable.revision,3);
+  assert.throws(()=>validateShareResponse({...metadata(),role:'admin'},token,origin));
+  assert.throws(()=>validateShareResponse({...metadata(),revision:0},token,origin));
+  assert.throws(()=>validateShareResponse({...metadata(),viewUrl:'https://attacker.example/s/'+token},token,origin));
+});
+test('edit-link sharing sends the entered password only to a fixed same-origin endpoint',async t=>{
+  const password='synthetic-creator-password-'.repeat(2);
+  t.mock.method(globalThis,'fetch',async(path:string,init:RequestInit)=>{
+    assert.equal(path,`/api/shares/${token}/edit-link`);assert.equal(init.method,'POST');assert.equal(init.credentials,'omit');assert.equal(init.redirect,'error');
+    assert.equal((init.headers as any).Authorization,`Bearer ${password}`);assert.equal(init.body,undefined);
+    return new Response(JSON.stringify({url:`${origin}/s/${'c'.repeat(64)}`,role:'edit'}));
+  });
+  assert.equal(await requestEditWorkspaceLink(`/api/shares/${token}/edit-link`,password,new AbortController().signal),`${origin}/s/${'c'.repeat(64)}`);
+  await assert.rejects(requestEditWorkspaceLink('https://attacker.example/edit-link',password,new AbortController().signal));
+});
+test('workspace saves include a revision and model identity and surface conflicts instead of retrying writes',async t=>{
+  let calls=0;
+  t.mock.method(globalThis,'fetch',async(path:string,init:RequestInit)=>{
+    calls++;assert.equal(path,`/api/shares/${token}`);assert.equal(init.method,'PUT');assert.equal(init.credentials,'omit');
+    assert.deepEqual(JSON.parse(String(init.body)),{workspace,modelIdentity:'b'.repeat(64),revision:1});
+    return new Response(JSON.stringify({error:{code:'WORKSPACE_CONFLICT',message:'unsafe server text'}}),{status:409,headers:{'Content-Type':'application/json'}});
+  });
+  await assert.rejects(saveProtectedWorkspace(token,{workspace,modelIdentity:'b'.repeat(64),revision:1},new AbortController().signal),/WORKSPACE_CONFLICT/);
+  assert.equal(calls,1);
 });

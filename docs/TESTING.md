@@ -100,14 +100,18 @@ in an STL do not override the actual source coordinate convention.
 
 ## Protected-share preview acceptance
 
-Complete the separate Cloudflare database/binding setup before this section. Use
-the dedicated test database and test keys. Keep beta/main promotion blocked until
+Complete [Cloudflare database/binding setup](SHARING_SETUP.md) before this
+section. Use the dedicated test database and test keys. Keep beta/main promotion blocked until
 the required runtime checks pass.
 
 | Test | Expected result |
 | --- | --- |
 | Fresh open and refresh | Open `/s/<token>` in a fresh profile and refresh. App JS/CSS/PWA assets resolve correctly; only platform API/model addresses appear in recipient traffic. |
-| Supported source | Share a synthetic, externally hosted approved-source STL with procedural objects. Recipients receive the snapshot with the same model identity and planning coordinates. |
+| Supported source | Share synthetic, approved-source STL, multi-object 3MF and self-contained GLB files. Recipients receive the same model identity, mesh visibility/opacity, groups and planning coordinates. |
+| Editing authorization | View links cannot write to D1. Issuing/retrieving edit links requires the creator password; view JSON must not disclose edit tokens. Edit recipients can explicitly Save; password/token values are not persisted in browser storage. |
+| Concurrent edits | Two saves of the same revision produce one success and one conflict. Admin settings changes also invalidate an editor's stale revision. No automatic retry may overwrite a newer save. |
+| Administration | Test password login, fresh-password edit-link sharing, labels, exact expiry preservation on label-only updates, bounded pagination, mobile scrolling and revocation of both capabilities. Expiry changes remain within 180 days of creation. |
+| Upgrade compatibility | Old view links and creation work before the additive migration; edit/admin operations remain disabled. Apply migration 0002, preserve records/scope/keys, then verify editing becomes available. |
 | Local-only assets | A local main model or custom mesh gives an explicit limitation. No file bytes, base64, DataURL or model vertex arrays enter D1. |
 | Creation authorization | No/wrong key and cross-origin requests fail. The creator key stays out of persisted browser storage, URLs, source bundles and logs. |
 | Environment isolation | Test Worker plus a beta/main-scoped database fails closed; missing configuration/database also fails closed. |

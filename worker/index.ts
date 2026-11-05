@@ -31,6 +31,13 @@ interface ShareRecord {
   created_at: number;
   expires_at: number;
   revoked_at: number | null;
+  revision?: number;
+  updated_at?: number | null;
+  label?: string;
+  edit_token_hash?: string | null;
+  view_token_ciphertext?: string | null;
+  edit_token_ciphertext?: string | null;
+  role?: 'view' | 'edit';
 }
 interface Dependencies { now?: () => number; fetch?: typeof fetch }
 const DAY = 86_400_000;
@@ -62,6 +69,14 @@ function ready(env: ShareEnvironment): boolean {
 async function environmentReady(env: ShareEnvironment): Promise<boolean> {
   if (!ready(env)) return false;
   return databaseScopeMatches(env);
+}
+async function editableSchemaReady(env: ShareEnvironment): Promise<boolean> {
+  try {
+    return (await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>())?.version === 2;
+  } catch { return false; }
+}
+async function requireEditableSchema(env: ShareEnvironment): Promise<void> {
+  if (!await editableSchemaReady(env)) throw new ShareError(503,'UPGRADE_REQUIRED','Apply the editable-workspace database migration before using this feature.');
 }
 function hex(buffer: ArrayBuffer | Uint8Array): string {
   return Array.from(new Uint8Array(buffer as ArrayBuffer), value => value.toString(16).padStart(2, '0')).join('');
@@ -134,9 +149,9 @@ function downloadRedirect(raw: string, origin: string): URL {
 }
 function extension(url: URL): string {
   let name: string;
-  try { name = decodeURIComponent(url.pathname.split('/').pop() || ''); } catch { throw new ShareError(400, 'FORMAT_UNSUPPORTED', 'Protected sharing currently supports self-contained STL models only.'); }
+  try { name = decodeURIComponent(url.pathname.split('/').pop() || ''); } catch { throw new ShareError(400, 'FORMAT_UNSUPPORTED', 'Protected sharing supports self-contained STL, 3MF and GLB models.'); }
   const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1].toLowerCase();
-  if (!['stl'].includes(ext || '')) throw new ShareError(400, 'FORMAT_UNSUPPORTED', 'Protected sharing currently supports self-contained STL models only.');
+  if (!['stl','3mf','glb'].includes(ext || '')) throw new ShareError(400, 'FORMAT_UNSUPPORTED', 'Protected sharing supports self-contained STL, 3MF and GLB models.');
   return ext!;
 }
 async function readJson(request: Request): Promise<unknown> {
@@ -179,7 +194,9 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   await authenticate(request, env);
   const owner = `creator:${env.SHARES_ENVIRONMENT}`;
   const body = await readJson(request) as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'modelIdentity'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'modelIdentity','label'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  const label = workspaceLabel(body.label ?? '');
+  const editable = await editableSchemaReady(env);
   const source = validateSource(body.sourceUrl, env, new URL(request.url).origin, true);
   const ext = extension(source);
   if (typeof body.modelIdentity !== 'string' || !TOKEN.test(body.modelIdentity)) throw new ShareError(400, 'MODEL_IDENTITY_INVALID', 'A model SHA-256 fingerprint is required.');
@@ -196,6 +213,7 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const limit = integerSetting(env.SHARES_MAX_RECORDS, 500, 5000);
   const dailyLimit = integerSetting(env.SHARES_DAILY_CREATE_LIMIT, 50, 1000);
   // D1 batch is transactional: the daily counter and record limit cannot race.
+  const viewCiphertext = editable ? await encryptSource(token,`view-token:${hash}`,env) : null;
   const results = await env.SHARES_DB!.batch([
     env.SHARES_DB!.prepare(`INSERT INTO shares(token_hash,source_ciphertext,model_extension,model_identity,workspace_json,owner_ref,created_at,expires_at)
       SELECT ?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM shares) < ?
@@ -204,18 +222,117 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
     env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at)
       SELECT ?,1,? WHERE EXISTS(SELECT 1 FROM shares WHERE token_hash=?)
       ON CONFLICT(bucket) DO UPDATE SET count=count+1`).bind(daily,now + 2 * DAY,hash),
+    ...(editable ? [env.SHARES_DB!.prepare('UPDATE shares SET label=?,updated_at=?,view_token_ciphertext=? WHERE token_hash=?').bind(label,now,viewCiphertext,hash)] : []),
   ]);
   if (!results[0]?.meta?.changes) throw new ShareError(429, 'SHARE_LIMIT', 'The share creation quota is full. Try later or contact the platform owner.');
-  return json({ url: new URL(`/s/${token}`, request.url).href, token, expiresAt: new Date(expires).toISOString() }, 201);
+  return json({ url: new URL(`/s/${token}`, request.url).href, token, expiresAt: new Date(expires).toISOString(),revision:1,editingAvailable:editable }, 201);
 }
 async function loadRecord(token: string, env: ShareEnvironment, now: number): Promise<ShareRecord> {
-  const result = await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL').bind(await hashToken(token),now).first<ShareRecord>();
+  const hash = await hashToken(token);
+  const editable = await editableSchemaReady(env);
+  const result = editable
+    ? await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE (token_hash=? OR edit_token_hash=?) AND expires_at>? AND revoked_at IS NULL').bind(hash,hash,now).first<ShareRecord>()
+    : await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL').bind(hash,now).first<ShareRecord>();
   if (!result || !Number.isSafeInteger(result.created_at) || result.created_at < 0
-    || !Number.isSafeInteger(result.expires_at) || result.expires_at !== result.created_at + SHARE_LIFETIME_MS
-    || result.model_extension !== 'stl' || !TOKEN.test(result.model_identity)) {
+    || !Number.isSafeInteger(result.expires_at) || result.expires_at <= result.created_at || result.expires_at > result.created_at + SHARE_LIFETIME_MS
+    || !['stl','3mf','glb'].includes(result.model_extension) || !TOKEN.test(result.model_identity)) {
     throw new ShareError(404, 'SHARE_UNAVAILABLE', 'This share is unavailable or has expired.');
   }
-  return result;
+  return {...result,role:result.token_hash===hash?'view':'edit'};
+}
+function workspaceLabel(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 128 || /[\u0000-\u001f\u007f]/.test(value)) throw new ShareError(400,'LABEL_INVALID','Use a workspace label of at most 128 characters.');
+  return value.trim();
+}
+function revision(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 2_147_483_646) throw new ShareError(400,'REVISION_INVALID','A valid workspace revision is required.');
+  return value as number;
+}
+function requestFields(body: any, allowed: string[]): void {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key=>!allowed.includes(key))) throw new ShareError(400,'REQUEST_INVALID','This workspace request contains unsupported fields.');
+}
+async function saveWorkspace(request: Request, record: ShareRecord, env: ShareEnvironment, now: number): Promise<Response> {
+  await requireEditableSchema(env);
+  if (record.role !== 'edit') throw new ShareError(403,'VIEW_ONLY','This is a view-only link. Ask its owner for an authorized edit link.');
+  const body = await readJson(request) as any;
+  requestFields(body,['workspace','modelIdentity','revision']);
+  const expected = revision(body.revision);
+  if (body.modelIdentity !== record.model_identity) throw new ShareError(409,'MODEL_CHANGED','The model identity does not match this workspace. Reload before saving.');
+  let workspace: unknown;
+  try { workspace = validateSharedWorkspace(body.workspace); }
+  catch { throw new ShareError(400,'INVALID_WORKSPACE','The workspace contains invalid or unsupported model/planning state.'); }
+  const result = await env.SHARES_DB!.prepare(`UPDATE shares SET workspace_json=?,revision=revision+1,updated_at=?
+    WHERE token_hash=? AND revision=? AND expires_at>? AND revoked_at IS NULL`)
+    .bind(JSON.stringify(workspace),now,record.token_hash,expected,now).run();
+  if (!result.meta?.changes) throw new ShareError(409,'WORKSPACE_CONFLICT','This workspace changed or expired. Reload its latest version before saving.');
+  return json({revision:expected+1,updatedAt:new Date(now).toISOString(),expiresAt:new Date(record.expires_at).toISOString()});
+}
+async function adminRecord(id: string, env: ShareEnvironment, now: number): Promise<ShareRecord> {
+  const record = await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL').bind(id,now).first<ShareRecord>();
+  if (!record || record.expires_at <= record.created_at || record.expires_at > record.created_at + SHARE_LIFETIME_MS) throw new ShareError(404,'SHARE_UNAVAILABLE','This workspace is unavailable, revoked or expired.');
+  return record;
+}
+async function issueEditLink(request: Request, record: ShareRecord, env: ShareEnvironment, now: number, knownViewToken?: string): Promise<Response> {
+  // Caller must authenticate the creator password for each issuance/retrieval.
+  let token: string;
+  if (record.edit_token_ciphertext && record.edit_token_hash) {
+    try { token = await decryptSource(record.edit_token_ciphertext,`edit-token:${record.token_hash}`,env); }
+    catch { throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','This workspace cannot recover its edit link with the current encryption key.'); }
+    if (!TOKEN.test(token) || await hashToken(token) !== record.edit_token_hash) throw new ShareError(503,'SHARING_UNAVAILABLE','The saved edit link is invalid.');
+  } else {
+    token = hex(crypto.getRandomValues(new Uint8Array(32)));
+    const cipher = await encryptSource(token,`edit-token:${record.token_hash}`,env);
+    const viewCipher = knownViewToken ? await encryptSource(knownViewToken,`view-token:${record.token_hash}`,env) : null;
+    const result = await env.SHARES_DB!.prepare(`UPDATE shares SET edit_token_hash=?,edit_token_ciphertext=?,view_token_ciphertext=COALESCE(view_token_ciphertext,?)
+      WHERE token_hash=? AND edit_token_hash IS NULL AND expires_at>? AND revoked_at IS NULL`)
+      .bind(await hashToken(token),cipher,viewCipher,record.token_hash,now).run();
+    if (!result.meta?.changes) throw new ShareError(409,'WORKSPACE_CONFLICT','The link changed or expired. Retry after refreshing the workspace.');
+  }
+  return json({url:new URL(`/s/${token}`,request.url).href,expiresAt:new Date(record.expires_at).toISOString(),role:'edit'});
+}
+async function listWorkspaces(request: Request, env: ShareEnvironment): Promise<Response> {
+  const url = new URL(request.url);
+  if ([...url.searchParams.keys()].some(key=>key!=='before') || url.searchParams.getAll('before').length>1) throw new ShareError(400,'REQUEST_INVALID','Unsupported management filter.');
+  const cursor = url.searchParams.get('before');
+  const match = cursor ? /^(\d{1,16})\.([a-f0-9]{64})$/.exec(cursor) : null;
+  if (cursor && (!match || !Number.isSafeInteger(Number(match[1])))) throw new ShareError(400,'REQUEST_INVALID','Invalid management cursor.');
+  const before = match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+  const afterId = match?.[2] || '';
+  const result = await env.SHARES_DB!.prepare(`SELECT json_group_array(json_object(
+    'id',token_hash,'label',label,'format',model_extension,'createdAt',created_at,'updatedAt',COALESCE(updated_at,created_at),
+    'expiresAt',expires_at,'revokedAt',revoked_at,'revision',revision,'viewCiphertext',view_token_ciphertext)) AS items
+    FROM (SELECT * FROM shares WHERE created_at<? OR (created_at=? AND token_hash>?) ORDER BY created_at DESC,token_hash ASC LIMIT 26)`)
+    .bind(before,before,afterId).first<{items:string}>();
+  const rows = JSON.parse(result?.items || '[]') as any[];
+  const items = [];
+  for (const row of rows.slice(0,25)) {
+    let viewUrl: string|null = null;
+    if (row.viewCiphertext) try {
+      const token = await decryptSource(row.viewCiphertext,`view-token:${row.id}`,env);
+      if (TOKEN.test(token) && await hashToken(token) === row.id) viewUrl = new URL(`/s/${token}`,request.url).href;
+    } catch { /* Listing/revocation stay available if old token encryption is unreadable. */ }
+    const {viewCiphertext:_cipher,...metadata} = row;
+    items.push({...metadata,viewUrl,maxExpiresAt:row.createdAt+SHARE_LIFETIME_MS});
+  }
+  const last = items.at(-1);
+  return json({items,nextCursor:rows.length>25&&last?`${last.createdAt}.${last.id}`:null});
+}
+async function updateWorkspaceSettings(request: Request, id: string, env: ShareEnvironment, now: number): Promise<Response> {
+  const record = await adminRecord(id,env,now);
+  const body = await readJson(request) as any;
+  requestFields(body,['revision','label','expiresAt']);
+  const expected = revision(body.revision);
+  if (body.label === undefined && body.expiresAt === undefined) throw new ShareError(400,'REQUEST_INVALID','Provide a label or expiry change.');
+  const label = body.label === undefined ? record.label || '' : workspaceLabel(body.label);
+  let expiry = record.expires_at;
+  if (body.expiresAt !== undefined) {
+    expiry = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
+    if (!Number.isSafeInteger(expiry) || expiry <= now || expiry > record.created_at+SHARE_LIFETIME_MS) throw new ShareError(400,'EXPIRY_INVALID','Expiry must be in the future and within 180 days of creation.');
+  }
+  const result = await env.SHARES_DB!.prepare(`UPDATE shares SET label=?,expires_at=?,updated_at=?,revision=revision+1
+    WHERE token_hash=? AND revision=? AND expires_at>? AND revoked_at IS NULL`).bind(label,expiry,now,id,expected,now).run();
+  if (!result.meta?.changes) throw new ShareError(409,'WORKSPACE_CONFLICT','The workspace changed or expired. Refresh before changing its settings.');
+  return json({revision:expected+1,label,expiresAt:new Date(expiry).toISOString()});
 }
 function safeModelHeaders(upstream: Response, ext: string): Headers {
   const headers = new Headers(protectedHeaders);
@@ -321,36 +438,70 @@ export function createShareWorker(dependencies: Dependencies = {}) {
       if (!url.pathname.startsWith('/api/shares')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found',{ status: 404 });
       try {
         if (request.headers.has('Origin') && request.headers.get('Origin') !== url.origin) throw new ShareError(403,'ORIGIN_INVALID','Cross-origin share requests are not allowed.');
-        if (url.search) throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
-        if (url.pathname === '/api/shares/config' && request.method === 'GET') return json({ enabled: await environmentReady(env) });
+        if (url.search && url.pathname !== '/api/shares/admin') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
+        if (url.pathname === '/api/shares/config' && request.method === 'GET') {
+          const enabled = await environmentReady(env);
+          return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),formats:['stl','3mf','glb']} : {enabled:false});
+        }
+        const admin = /^\/api\/shares\/admin(?:\/([a-f0-9]{64})(?:\/(edit-link))?)?$/.exec(url.pathname);
+        if (admin) {
+          await authenticate(request,env);
+          if (!await environmentReady(env)) throw new ShareError(503,'SHARING_DISABLED','Protected sharing is not configured on this environment.');
+          await requireEditableSchema(env);
+          if (!admin[1] && request.method === 'GET') return await listWorkspaces(request,env);
+          if (admin[1] && admin[2] === 'edit-link' && request.method === 'POST') return await issueEditLink(request,await adminRecord(admin[1],env,now()),env,now());
+          if (admin[1] && !admin[2] && request.method === 'PATCH') return await updateWorkspaceSettings(request,admin[1],env,now());
+          if (admin[1] && !admin[2] && request.method === 'DELETE') {
+            await env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=?,revision=revision+1 WHERE token_hash=? AND revoked_at IS NULL').bind(now(),admin[1]).run();
+            return new Response(null,{status:204,headers:protectedHeaders});
+          }
+          throw new ShareError(405,'METHOD_NOT_ALLOWED','This management method is not supported.');
+        }
+        const editLink = /^\/api\/shares\/([a-f0-9]{64})\/edit-link$/.exec(url.pathname);
+        if (editLink) {
+          if (request.method !== 'POST') throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+          await authenticate(request,env);
+          if (!await environmentReady(env)) throw new ShareError(503,'SHARING_DISABLED','Protected sharing is not configured on this environment.');
+          await requireEditableSchema(env);
+          const record = await loadRecord(editLink[1],env,now());
+          return await issueEditLink(request,record,env,now(),record.role==='view'?editLink[1]:undefined);
+        }
         if (url.pathname === '/api/shares' && request.method === 'POST') {
           if (!await environmentReady(env)) throw new ShareError(503,'SHARING_DISABLED','Protected sharing is not configured on this environment.');
           return await createShare(request,env,now());
         }
         const path = /^\/api\/shares\/([a-f0-9]{64})(?:\/model\.(stl|glb|3mf))?$/.exec(url.pathname);
         if (!path || !TOKEN.test(path[1])) throw new ShareError(404,'SHARE_UNAVAILABLE','This share is unavailable or has expired.');
-        if (!['GET','HEAD','DELETE'].includes(request.method)) throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
-        if (request.method === 'DELETE' && path[2]) throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+        if (!['GET','HEAD','DELETE','PUT'].includes(request.method)) throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+        if (['DELETE','PUT'].includes(request.method) && path[2]) throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
         if (!await environmentReady(env)) throw new ShareError(503,'SHARING_DISABLED','Protected sharing is not configured on this environment.');
         const token = path[1];
         if (request.method === 'DELETE') {
           // This version has one environment-scoped staff credential, not user accounts.
           // Rotating that credential must not orphan existing shares.
           await authenticate(request,env);
-          await env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=? WHERE token_hash=?').bind(now(),await hashToken(token)).run();
+          const hash = await hashToken(token);
+          if (await editableSchemaReady(env)) await env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=?,revision=revision+1 WHERE token_hash=? OR edit_token_hash=?').bind(now(),hash,hash).run();
+          else await env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=? WHERE token_hash=?').bind(now(),hash).run();
           return new Response(null,{ status:204,headers:protectedHeaders });
         }
         const record = await loadRecord(token,env,now());
         if (path[2] && path[2] !== record.model_extension) throw new ShareError(404,'SHARE_UNAVAILABLE','This share is unavailable or has expired.');
         // Invalid, expired and revoked tokens must never allocate limiter rows.
         await rateLimit(request,env,now());
+        if (request.method === 'PUT') return await saveWorkspace(request,record,env,now());
         if (path[2]) {
           return await streamModel(request,record,env,upstreamFetch);
         }
         if (request.method === 'HEAD') return new Response(null,{ headers:protectedHeaders });
         // Validate stored state again: a malformed or restored record must fail closed.
         const workspace = validateSharedWorkspace(JSON.parse(record.workspace_json));
-        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString() });
+        let viewUrl: string|undefined;
+        if (record.role==='edit' && record.view_token_ciphertext) try {
+          const viewToken=await decryptSource(record.view_token_ciphertext,`view-token:${record.token_hash}`,env);
+          if(TOKEN.test(viewToken)&&await hashToken(viewToken)===record.token_hash)viewUrl=new URL(`/s/${viewToken}`,request.url).href;
+        } catch { /* A missing old view address does not grant or remove edit access. */ }
+        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),role:record.role,revision:record.revision??1,...(viewUrl?{viewUrl}:{}) });
       } catch (error) {
         if (error instanceof ShareError) return json({ error: { code:error.code,message:error.message } },error.status);
         // Never echo SQL, secrets, user annotations or upstream URL/error bodies.

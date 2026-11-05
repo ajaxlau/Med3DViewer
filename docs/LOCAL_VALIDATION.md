@@ -1,5 +1,17 @@
 # Local validation of the testing PR
 
+## Extension checks recorded 5 November 2026
+
+- Added SQLite-backed cases for separate view/edit capabilities, authenticated link recovery, atomic revision checks, concurrent editors, source-identity checks, paginated administration, fixed maximum expiry, revocation and migration compatibility.
+- Multi-object 3MF package tests cover external resources, XML entities, unsafe paths, actual bounded expansion and cancellation. Mesh-state tests check hidden instances, repeated names, zero opacity, layout mismatch and batched rendering. GLB checks require self-contained resources for protected sharing while retaining ordinary companion-resource loading.
+- Both migrations applied to a separate **local** D1 instance with a synthetic UUID. Real Worker/D1/Chromium checks at mobile width passed admin login, a fresh password prompt, rejection of a wrong password, edit-link issuance, saving display state, conflict handling, exact expiry preservation on label-only edits, the expiry maximum and revocation of both capabilities. No real Dropbox model or user secret was used.
+- TypeScript and the complete app/PWA artifact build pass with a 256-file soft limit. The manager is a deferred ~9 kB chunk and bypasses viewer initialization; it allocates no viewer/GPU instance in the browser check. This is layout/runtime evidence, not physical-device memory certification.
+- The full local Node runner encounters sandbox `EPERM` when artifact tests spawn another Node process. Focused files run directly; full-suite evidence must come from the PR's CI rather than counting that blocked run as a pass.
+
+Real 3MF source/rendering acceptance on the isolated Cloudflare test deployment is pending. The owner has confirmed the prior protected STL flow works. The original initial-stage record follows for historical context.
+
+## Initial implementation record (4 November 2026)
+
 Recorded 4 November 2026. This evidence is for the draft implementation, not a completed Cloudflare deployment or physical-device certification.
 
 - Node **22.23.4**: **70 actual test cases passed, zero failed** using the per-file test runner. This includes 18 SQLite-backed sharing Worker cases, actual bounded ZIP expansion tests, procedural planning/metadata fixtures, URL validation, mobile DPR, UI request races and deployment configuration/artifact tests.
@@ -12,4 +24,4 @@ Recorded 4 November 2026. This evidence is for the draft implementation, not a c
 
 Before beta merge, complete the isolated Cloudflare/Dropbox test in [SHARING_SETUP.md](SHARING_SETUP.md), browser and actual 3D Slicer checks in [TESTING.md](TESTING.md), and physical-device acceptance. Any additional application-level Slicer/browser evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Do not infer those results from helper tests.
 
-Protected sharing is intentionally limited to Dropbox STL with procedural planning objects. Custom/local models, full model copies, automatic decimation, interruptible parser workers, wholesale asynchronous storage migration and replacement of the continuous overlay loop are not claimed complete by this PR. They remain measured/reviewed follow-up gates in the plan.
+At that initial stage, protected sharing was limited to Dropbox STL with procedural planning objects. Custom/local models, full model copies, automatic decimation, interruptible parser workers, wholesale asynchronous storage migration and replacement of the continuous overlay loop remain outside the completed scope.

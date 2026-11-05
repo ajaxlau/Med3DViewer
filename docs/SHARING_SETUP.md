@@ -2,7 +2,7 @@
 
 This draft adds D1 metadata and a streaming Worker, **not model storage**. Start on the test Worker below. Do not change the existing production Worker or merge the PR to beta until acceptance is reviewed. The ordinary root configuration leaves protected sharing disabled.
 
-The approved test policy is Dropbox-only, one private creator key, read-only recipients, and 180-day links. This first test version accepts externally hosted STL only; normal model viewing still supports other formats. Local custom meshes cannot be included in shared JSON. Large-model reduction is still a feasibility gate, not enabled automatically.
+The approved test policy is Dropbox-only, one private creator password, separate view/edit links, and a maximum of 180 days from creation. Protected sharing supports self-contained STL, 3MF and GLB files; local custom meshes cannot be included in shared JSON. Editing, per-mesh state, the admin page and the additive D1 upgrade are covered in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Large-model reduction is still a feasibility gate, not enabled automatically.
 
 ## Resource map
 
@@ -20,7 +20,7 @@ Each database gets the same schema, a different UUID, and its own scope row. Bot
 
 Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. The owner-provided test ID `5645e9dd-918f-4bbc-a0d6-9e1c315c27ca` is recorded in [config/shares.test.json](../config/shares.test.json). It is used only by the dedicated test target. Beta/main have no database defaults. Do not send any password/API token in chat.
 
-Open this database's **Console**. Copy and execute the SQL in [0001_shares.sql](../migrations/0001_shares.sql), then run:
+For a new database, open its **Console** and execute [0001_shares.sql](../migrations/0001_shares.sql), followed by [0002_editable_workspaces.sql](../migrations/0002_editable_workspaces.sql), then run:
 
 ```sql
 INSERT INTO share_environment (id, scope) VALUES (1, 'test');
@@ -28,6 +28,8 @@ SELECT scope FROM share_environment WHERE id = 1;
 ```
 
 The result must be `test`. The migration creates empty tables and indexes; it contains no patient data and no model files. If the INSERT reports an existing row, inspect its scope instead of replacing it. A database with a different scope must not be reused.
+
+For an existing working test database, follow the one-time upgrade and dashboard migration bookkeeping in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md); do not recreate the database or insert its scope again.
 
 ### 2. Add a separate test Worker connected to the PR branch
 
@@ -67,7 +69,7 @@ Anyone holding the current creator key can revoke any share in that environment.
 Deploy/save the secret changes. Check the test Worker URL shown by Cloudflare, normally `https://ntec3dpo-m3dv-sharing-test.x-panda.workers.dev`. Open `/api/shares/config` on it. Expected result after schema, binding, scope and both secrets are ready:
 
 ```json
-{"enabled":true}
+{"enabled":true,"editingEnabled":true,"formats":["stl","3mf","glb"]}
 ```
 
 `false` means sharing stays disabled. Verify the binding/UUID, scope row, runtime variables and secret names/lengths. It intentionally does not reveal secrets or database internals. Never turn on production sharing just to troubleshoot test configuration.
@@ -92,9 +94,9 @@ This error means bundling exceeded the build machine's file-descriptor limit, fo
 
 ### 4. Test the existing Share workflow
 
-Use a synthetic/de-identified **Dropbox STL** first. Load it through the existing URL dialog; wait for ready. Create a distance, angle, point, plane/curve and annotation, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected link.
+Use a synthetic/de-identified **Dropbox STL, 3MF or GLB**. Load it through the existing URL dialog; wait for ready. Set mesh visibility/opacity, create analytic objects and annotations, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected view link.
 
-Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm the model, annotations and analytic objects restore; copied/QR addresses contain no Dropbox URL. The recipient does not need the creator key. Verify refresh, early revocation, mobile orientation, cancellation and source-unavailable behavior using [TESTING.md](TESTING.md).
+Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm meshes, visibility, opacity, annotations and analytic objects restore; copied/QR addresses contain no Dropbox URL. View recipients cannot save to D1. Use **Authorize sharing an edit link…**, enter the creator password again, then test explicit Save, conflicts and the admin page as described in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Verify refresh, early revocation, mobile orientation, cancellation and source-unavailable behavior using [TESTING.md](TESTING.md).
 
 The creator key is memory-only and cleared when the dialog closes; shared snapshots are not auto-saved to recipient localStorage. A bearer link can be forwarded. Expiry cannot recall already downloaded/rendered data. The model must remain available at Dropbox; a changed file is rejected before its old workspace is applied, although changed bytes may already have been streamed to the browser.
 

@@ -5,6 +5,7 @@ import {
 } from "./gpuDetection";
 import { disposeHierarchy, isSafeModelUrl } from "./utils";
 import { loadZip } from "./loadZip";
+import { captureSharedMeshState, matchSharedMeshState } from './sharedMeshState';
 import { ArchiveLimitError, readArchiveEntry } from "./archiveReading";
 import { enforcePixelRatioLimit, getRenderPixelRatioCap } from "./renderResolution";
 import { validateSharedWorkspace, normalizeSlicerCoordinateSystem, validateSlicerMarkups, validateEmbeddedPlanningAsset, validatePlanningMetadata, validatePlanningArchiveEntries, safePlanningColor, transformedDistance, transformedAngle } from "./planningData";
@@ -1442,11 +1443,16 @@ Please open a file.`,
     this.config.onProgressChange && this.config.onProgressChange(0);
     this.config.onStatusChange(failure.message, !0, null, null);
   }
-  async loadFiles(i, options: { shared?: boolean } = {}) {
+  async loadFiles(i, options: { shared?: boolean; signal?: AbortSignal } = {}) {
     if (!i || i.length === 0) return;
     this.readOnlySharedWorkspace = options.shared === true;
     this.loadedModelIdentity = null;
     this.cancelModelLoad(!0);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) controller.abort();
+    this.activeLoadController = controller;
     const requestId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     const files = Array.from(i) as File[];
     const profile = getDeviceLoadProfile(this.gpuCapabilities, this.forceSafeMode);
@@ -1458,7 +1464,7 @@ Please open a file.`,
     });
     this.config.onStatusChange('Validating local model...', !0, files[0].name, null);
     try {
-      const result = await validateLocalFiles(files, profile);
+      const result = await validateLocalFiles(files, profile, { requireSelfContained: options.shared === true, signal: controller.signal });
       if (requestId !== this.activeLoadRequestId) return;
       this.resetWorkspace(!0);
       this.activeLoadRequestId = requestId;
@@ -1473,6 +1479,7 @@ Please open a file.`,
       this.viewer.LoadModelFromFileList(files);
       this.waitForModelAndBuildTree(result.primaryName, undefined, requestId);
     } catch (error) { this.failModelLoad(requestId, error); }
+    finally { options.signal?.removeEventListener('abort',abort); }
   }
   async loadUrl(i, camera) {
     this.readOnlySharedWorkspace = false;
@@ -1536,7 +1543,7 @@ Please open a file.`,
       const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
       const file = new File([blob], filename, { type: blob.type });
       chunks.length = 0; // The Blob owns its bytes; release retained download chunks.
-      const validation = await validateLocalFiles([file], profile);
+      const validation = await validateLocalFiles([file], profile, { signal: controller.signal });
       if (requestId !== this.activeLoadRequestId) return;
       // Bind protected-share metadata to exactly the bytes actually imported.
       // Digest before GPU allocation, and retain only the small identity string.
@@ -1554,6 +1561,7 @@ Please open a file.`,
       this.activeLoadController = controller;
       this.loadedUrl = url.href;
       this.loadedModelIdentity = modelIdentity;
+      this.loadedModelShareable = validation.protectedShareable;
       this.emitModelLoadState({ phase: 'parsing', progress: 75, bytesReceived: received, bytesTotal: declaredLength || received });
       this.config.onStatusChange('Parsing downloaded model...', !0, filename, url.href);
       this.config.onProgressChange && this.config.onProgressChange(75);
@@ -1822,7 +1830,7 @@ Please open a file.`,
       } catch {}
     }
   }
-  setMeshOpacity(i, r) {
+  setMeshOpacity(i, r, render = true) {
     const l = this.currentMeshes[i];
     if (l && l.material) {
       (Array.isArray(l.material) ? l.material : [l.material]).forEach((s) => {
@@ -1833,7 +1841,7 @@ Please open a file.`,
           (s.depthWrite = r === 1),
           (s.side = r < 1 ? window.THREE.FrontSide : s._originalSide));
       });
-      try {
+      if (render) try {
         this.viewer.viewer.Render();
       } catch {}
     }
@@ -5611,9 +5619,10 @@ It contains both Slicer markup properties and the application's internal groupin
       return definition;
     });
     return validateSharedWorkspace({
-      schemaVersion: 1,
+      schemaVersion: 2,
       coordinateSystem: { systemType: 'Viewer world with recorded model root', units: 'millimeters (mm)' },
       modelMatrix: (root?.matrixWorld ?? new T.Matrix4()).toArray(), objects,
+      meshes: captureSharedMeshState(this.currentMeshes, root),
       groups: this.planningGroups.map(group => ({ id: group.id, name: group.name, visible: group.visible !== false, collapsed: !!group.isCollapsed })),
     });
   }
@@ -5627,6 +5636,7 @@ It contains both Slicer markup properties and the application's internal groupin
     if (current.some((value, index) => Math.abs(value - snapshot.modelMatrix[index]) > 1e-7 * Math.max(1, Math.abs(value)))) {
       throw new Error('The loaded model uses a different coordinate frame. Planning data was not applied; ask its owner to recreate this share.');
     }
+    if (snapshot.meshes) matchSharedMeshState(snapshot.meshes, captureSharedMeshState(this.currentMeshes, root));
     // Never write a recipient's snapshot into filename-keyed owner workspaces.
     this.readOnlySharedWorkspace = true;
     this.planningStorageSuspended = true;
@@ -5667,6 +5677,16 @@ It contains both Slicer markup properties and the application's internal groupin
         this.updatePlanningCardLabel(object);
       }
       this.nextPlanningObjectId = Math.max(this.nextPlanningObjectId || 1, ...this.planningObjects.map(object => Number(String(object.id).split('_').at(-1)) + 1).filter(Number.isFinite));
+      if (snapshot.meshes) {
+        snapshot.meshes.forEach((state, index) => {
+          this.currentMeshes[index].visible = state.visible;
+          this.setMeshOpacity(index, state.opacity, false);
+        });
+        this.config.onMeshesChange?.(this.currentMeshes.map((mesh, id) => ({
+          id, name: mesh.name || `Mesh ${id + 1}`, visible: mesh.visible !== false,
+          opacity: snapshot.meshes![id].opacity,
+        })));
+      }
       this.notifyGroupsChanged();
       this.config.onPlanningObjectsChange?.(this.planningObjects);
       this.viewer.viewer.Render();

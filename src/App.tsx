@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { ViewerProvider, useViewer } from './context/ViewerContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -8,6 +8,8 @@ import { PlanningMenu } from './components/PlanningMenu';
 import { isSafeModelUrl } from './lib/utils';
 import { beginSharedModelImport, captureModelLoad, loadSharedModel, tokenFromSharePath, waitForSharedModelReady } from './lib/sharedWorkspace';
 import { getDeviceLoadProfile } from './lib/modelLoading';
+import { SharedWorkspaceBar, type SharedWorkspaceSession } from './components/SharedWorkspaceBar';
+const ShareAdminPage=lazy(()=>import('./components/ShareAdminPage'));
 
 // Add the global reference for easy hacky access in simple DOM events (like file inputs)
 declare global {
@@ -17,10 +19,14 @@ declare global {
 }
 
 function MainLayout() {
-  const { viewerManager, activeModal, isEmpty } = useViewer();
+  const { viewerManager, activeModal, isEmpty, modelLoadState } = useViewer();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [sharedNotice, setSharedNotice] = useState<{ loading: boolean; error?: boolean; text: string } | null>(null);
   const sharedAbortRef = useRef<AbortController | null>(null);
+  const [sharedSession,setSharedSession]=useState<SharedWorkspaceSession|null>(null);
+  useEffect(()=>{
+    if(sharedSession&&modelLoadState.requestId!==sharedSession.requestId){setSharedSession(null);setSharedNotice(null);}
+  },[modelLoadState.requestId,sharedSession]);
 
   useEffect(() => {
     let timer1 = setTimeout(() => {
@@ -73,8 +79,11 @@ function MainLayout() {
             viewerManager.loadedUrl = metadata.modelUrl;
             viewerManager.loadedModelIdentity = metadata.modelIdentity;
             viewerManager.sharedWorkspaceExpiresAt = metadata.expiresAt;
+            viewerManager.sharedWorkspaceRole = metadata.role;
+            viewerManager.sharedWorkspaceViewUrl = metadata.viewUrl ?? (metadata.role==='view'?`${window.location.origin}/s/${token}`:null);
+            setSharedSession({token,role:metadata.role,revision:metadata.revision,modelIdentity:metadata.modelIdentity,requestId:importId!,expiresAt:metadata.expiresAt});
             viewerManager.config.onStatusChange('Shared workspace loaded.', false, file.name, metadata.modelUrl);
-            setSharedNotice({ loading: false, text: `Shared snapshot · expires ${new Date(metadata.expiresAt).toLocaleDateString()}. Changes stay on this device.` });
+            setSharedNotice(null);
           } catch (error) {
             if (controller.signal.aborted) {
               if (importId && viewerManager.activeLoadRequestId === importId) viewerManager.cancelModelLoad();
@@ -177,6 +186,10 @@ function MainLayout() {
         <Header 
           toggleSidebar={toggleSidebar}
         />
+        {sharedSession&&viewerManager&&<SharedWorkspaceBar session={sharedSession} manager={viewerManager} onSaved={(revision,expiresAt)=>{
+          setSharedSession(previous=>previous&&previous.token===sharedSession.token?{...previous,revision,expiresAt}:previous);
+          viewerManager.sharedWorkspaceExpiresAt=expiresAt;
+        }} />}
         {sharedNotice && (
           <div role={sharedNotice.error ? 'alert' : 'status'} className={`px-4 py-2 text-xs flex items-center justify-between gap-3 ${sharedNotice.error ? 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200'}`}>
             <span>{sharedNotice.text}</span>
@@ -201,6 +214,7 @@ function MainLayout() {
 }
 
 export default function App() {
+  if(/^\/admin\/shares\/?$/.test(window.location.pathname))return <Suspense fallback={<p className="p-6">Opening workspace manager…</p>}><ShareAdminPage /></Suspense>;
   return (
     <ViewerProvider>
       <MainLayout />

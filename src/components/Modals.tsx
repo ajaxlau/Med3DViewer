@@ -9,6 +9,7 @@ const InfoModal = lazy(() => import('./InfoModal').then(module => ({ default: mo
 import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
 import { createProtectedShare } from '../lib/sharedWorkspace';
+import { EditLinkAuthorization } from './EditLinkAuthorization';
 
 export function Modals() {
   const { activeModal, setActiveModal, filename, loadedUrl, isEmpty, resetWorkspace } = useViewer();
@@ -26,12 +27,19 @@ export function Modals() {
   const [protectedExpiry, setProtectedExpiry] = useState<string | null>(null);
   const [isProtectedLink, setIsProtectedLink] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [workspaceToken,setWorkspaceToken]=useState<string|null>(null);
+  const [editingEnabled,setEditingEnabled]=useState(false);
+  const [authorizeEdit,setAuthorizeEdit]=useState(false);
+  const [sharingEdit,setSharingEdit]=useState(false);
+  const [viewShareUrl,setViewShareUrl]=useState('');
+  const [workspaceLabel,setWorkspaceLabel]=useState('');
   const shareAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (activeModal !== 'share') {
       shareAbortRef.current?.abort();
       setCreatorKey('');
+      setAuthorizeEdit(false);
       setCreatingShare(false);
       return;
     }
@@ -39,7 +47,7 @@ export function Modals() {
     setProtectedEnabled(false);
     void fetch('/api/shares/config', { signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' })
       .then(async response => response.ok ? response.json() : null)
-      .then(value => { if (!controller.signal.aborted) setProtectedEnabled(value?.enabled === true); })
+      .then(value => { if (!controller.signal.aborted) {setProtectedEnabled(value?.enabled === true);setEditingEnabled(value?.editingEnabled === true);} })
       .catch(() => { /* Legacy model sharing remains available when the service is disabled. */ });
     return () => controller.abort();
   }, [activeModal]);
@@ -59,21 +67,23 @@ export function Modals() {
     try {
       const url = new URL(loadedUrl, window.location.origin);
       if (url.origin === window.location.origin && url.pathname.startsWith('/api/shares/')) {
-        throw new Error('This is an existing shared snapshot. Ask its owner to create a new snapshot from the source model.');
+        throw new Error('This is an existing shared workspace. Use its authorized edit link to save changes.');
       }
-      if (!/^https:$/.test(url.protocol) || !/\.stl$/i.test(url.pathname)) {
-        throw new Error('Protected sharing currently supports externally hosted STL files. Other models can use the existing direct link or file export.');
+      if (!/^https:$/.test(url.protocol) || !/\.(?:stl|3mf|glb)$/i.test(url.pathname)) {
+        throw new Error('Protected sharing supports self-contained Dropbox STL, 3MF and GLB files.');
       }
+      if(manager.loadedModelShareable===false)throw new Error('This model has external or unsupported resources. Export a self-contained 3MF or GLB before protected sharing.');
       const result = await createProtectedShare({
         sourceUrl: loadedUrl,
         workspace: manager.exportShareWorkspace(),
-        modelIdentity: manager.loadedModelIdentity || ''
+        modelIdentity: manager.loadedModelIdentity || '',label:workspaceLabel,
       }, creatorKey, controller.signal);
       if (controller.signal.aborted) return;
       setShareVal(result.url);
       setIsProtectedLink(true);
       setProtectedExpiry(result.expiresAt);
       setCreatedToken(result.token);
+      setWorkspaceToken(result.token);setViewShareUrl(result.url);setSharingEdit(false);
     } catch (error) {
       if (!controller.signal.aborted) setProtectedError(error instanceof Error ? error.message : 'The protected share could not be created.');
     } finally {
@@ -96,6 +106,7 @@ export function Modals() {
       if (!response.ok) throw new Error('The link could not be revoked. Check the authorized key and try again.');
       if (!controller.signal.aborted) {
         setShareVal(''); setCreatedToken(null); setProtectedExpiry(null); setIsProtectedLink(false);
+        setWorkspaceToken(null);setViewShareUrl('');setSharingEdit(false);
         setProtectedError('The protected link was revoked. Create a new link if you want to share again.');
       }
     } catch (error) {
@@ -122,14 +133,17 @@ export function Modals() {
       let baseUrl = window.location.href.split('#')[0].split('?')[0];
       if (window.location.pathname.startsWith('/s/')) baseUrl = `${window.location.origin}/`;
       setProtectedError(''); setProtectedExpiry(null); setIsProtectedLink(false); setCreatedToken(null); setCreatingShare(false);
+      setWorkspaceToken(null);setAuthorizeEdit(false);setSharingEdit(false);setViewShareUrl('');setWorkspaceLabel('');
       const isSandboxUrl = baseUrl.startsWith('blob:') || baseUrl.includes('.webcomponent.local') || window.location.hostname === 'localhost' || window.location.hostname.includes('.run.app');
       setIsSandbox(isSandboxUrl);
       
       if (!isEmpty && loadedUrl) {
          const currentModelUrl = new URL(loadedUrl, window.location.origin);
-         const protectedMatch = /^\/api\/shares\/([a-f0-9]{64})\/model\.stl$/.exec(currentModelUrl.pathname);
+         const protectedMatch = /^\/api\/shares\/([a-f0-9]{64})\/model\.(?:stl|3mf|glb)$/.exec(currentModelUrl.pathname);
          if (currentModelUrl.origin === window.location.origin && protectedMatch) {
-           setShareVal(`${window.location.origin}/s/${protectedMatch[1]}`);
+           const manager=window._viewerManagerInstance;
+           const viewUrl=manager?.sharedWorkspaceRole==='edit'?(manager.sharedWorkspaceViewUrl||''):`${window.location.origin}/s/${protectedMatch[1]}`;
+           setShareVal(viewUrl);setViewShareUrl(viewUrl);setWorkspaceToken(protectedMatch[1]);
            setIsProtectedLink(true);
            setProtectedExpiry(window._viewerManagerInstance?.sharedWorkspaceExpiresAt || null);
          } else if (isSandboxUrl) {
@@ -437,9 +451,9 @@ export function Modals() {
                 <>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">
                   {isSandbox && <><strong className="text-red-500">Preview Mode:</strong> You are in a temporary sandbox. Once deployed, it will look like this:<br/><br/></>}
-                  {isProtectedLink ? 'Protected workspace snapshot: the source address is hidden. Anyone with this link can view it until expiry.' : 'Direct model link: the original source URL is visible. This link does not include planning objects.'}
+                  {isProtectedLink ? (sharingEdit?'Edit link: anyone holding it can save workspace changes.':'View-only workspace link: the source address is hidden and saved changes require a separate edit link.') : 'Direct model link: the original source URL is visible. This link does not include planning objects.'}
                 </p>
-                <div className="flex flex-col gap-4 mb-6">
+                {shareVal ? <div className="flex flex-col gap-4 mb-6">
                   <div className="bg-white p-4 rounded-md border border-zinc-200 dark:border-zinc-800 mx-auto shadow-sm flex items-center justify-center relative">
                     <QRCodeSVG 
                       value={shareVal} 
@@ -463,13 +477,14 @@ export function Modals() {
                     </div>
                   </div>
                   <input readOnly value={shareVal} className="w-full p-3 border border-zinc-300 dark:border-zinc-700 rounded-sm bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-mono text-sm outline-none" />
-                </div>
+                </div> : <p className="mb-4 text-xs">The original view address is unavailable for this older workspace. Its owner can authorize an edit link below.</p>}
                 </>
             )}
             {protectedExpiry && <p className="text-xs mb-3 text-zinc-600 dark:text-zinc-300">Expires {new Date(protectedExpiry).toLocaleString()}. The source host must remain available. Downloaded copies cannot be recalled.</p>}
             {protectedEnabled && loadedUrl && !isProtectedLink && (
               <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 mt-4 space-y-3">
-                <p className="text-xs text-zinc-600 dark:text-zinc-300">Create a 180-day link containing this model’s current annotations and analytic objects. The model stays at its original host; only workspace metadata is stored. Initial protected sharing supports external STL files without local custom meshes.</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-300">Create a view-only link with this model’s mesh visibility, opacity, annotations and analytic objects. Self-contained Dropbox STL, 3MF and GLB models are supported. Links expire within 180 days; model files remain at Dropbox.</p>
+                {editingEnabled&&<label className="block text-xs">Workspace label (optional)<input value={workspaceLabel} maxLength={128} onChange={event=>setWorkspaceLabel(event.target.value)} className="mt-1 block min-h-11 w-full rounded border border-zinc-400 bg-transparent px-3 text-sm" /></label>}
                 <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-200">
                   Authorized share-creation key
                   <input type="password" autoComplete="off" value={creatorKey} onChange={event => setCreatorKey(event.target.value)} className="mt-1 block w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-2 text-sm" placeholder="Key provided by the platform owner" />
@@ -478,6 +493,11 @@ export function Modals() {
                 <p className="text-[11px] text-zinc-500">The key is kept in memory while this dialog is open and is never included in the shared address.</p>
               </div>
             )}
+            {protectedEnabled&&isProtectedLink&&workspaceToken&&editingEnabled&&<div className="my-3 space-y-3">
+              {authorizeEdit?<EditLinkAuthorization path={`/api/shares/${workspaceToken}/edit-link`} onCancel={()=>setAuthorizeEdit(false)} onAuthorized={url=>{setShareVal(url);setSharingEdit(true);setAuthorizeEdit(false);}} />:<button className="min-h-11 rounded border border-blue-500 px-3 text-sm" onClick={()=>setAuthorizeEdit(true)}>Authorize sharing an edit link…</button>}
+              {sharingEdit&&viewShareUrl&&<button className="min-h-11 px-3 text-sm underline" onClick={()=>{setShareVal(viewShareUrl);setSharingEdit(false);}}>Show view-only link</button>}
+            </div>}
+            {protectedEnabled&&<a href="/admin/shares" target="_blank" rel="noopener noreferrer" className="my-2 inline-block min-h-11 content-center text-sm text-blue-600 underline">Manage protected workspaces</a>}
             {createdToken && <button disabled={creatingShare} className="min-h-11 text-xs text-red-600 underline" onClick={handleRevokeProtectedShare}>Revoke this protected link</button>}
             {protectedError && <p role="alert" className="mt-3 text-xs text-red-600 dark:text-red-300">{protectedError}</p>}
             <div className="flex justify-end items-center gap-3 mt-6 w-full">

@@ -7,8 +7,9 @@ import { createShareWorker, hashToken, SHARE_LIFETIME_MS, validateSource, type S
 
 class TestDatabase {
   db = new DatabaseSync(':memory:');
-  constructor() {
+  constructor(editable = true) {
     this.db.exec(readFileSync(new URL('../migrations/0001_shares.sql', import.meta.url), 'utf8'));
+    if (editable) this.db.exec(readFileSync(new URL('../migrations/0002_editable_workspaces.sql', import.meta.url), 'utf8'));
     this.db.exec("INSERT INTO share_environment(scope) VALUES('test')");
   }
   prepare(sql: string): D1Statement {
@@ -72,7 +73,7 @@ test('D1 stores encrypted source and hashed token only; recipient JSON is saniti
 test('sharing fails closed for disabled, absent/mismatched database scope and unauthorized creation',async()=>{
   const env=environment(),worker=createShareWorker();
   const config=()=>worker.fetch(new Request('https://viewer.example.com/api/shares/config'),env);
-  assert.deepEqual(await (await config()).json(),{ enabled:true });
+  assert.deepEqual(await (await config()).json(),{ enabled:true,editingEnabled:true,formats:['stl','3mf','glb'] });
   const denied=await worker.fetch(new Request(createRequest(),{ headers:{ 'Content-Type':'application/json' } }),env);
   assert.equal(denied.status,401);
   env.SHARES_ENVIRONMENT='main';
@@ -91,7 +92,7 @@ test('source policy blocks SSRF targets, credentials, arbitrary hosts, wrong for
   for(const sourceUrl of [
     'http://dl.dropboxusercontent.com/model.stl','https://127.0.0.1/model.stl','https://[::1]/model.stl',
     'https://user:pass@dl.dropboxusercontent.com/model.stl','https://dl.dropboxusercontent.com:444/model.stl',
-    'https://unapproved.example.net/model.stl','https://dl.dropboxusercontent.com/model.glb',
+    'https://unapproved.example.net/model.stl','https://dl.dropboxusercontent.com/model.obj',
   ]) assert.equal((await worker.fetch(createRequest({ sourceUrl }),env)).status,400);
   assert.equal((await worker.fetch(createRequest({ workspace:{ ...workspace(),fileDataURL:'data:application/octet-stream;base64,AAAA' } }),env)).status,400);
   assert.equal((await worker.fetch(createRequest({ workspace:{ ...workspace(),objects:[{ id:'one',name:'x',type:'custom_model',meshMatrix:identityMatrix,fileDataURL:'data:application/octet-stream;base64,AAAA' }] } }),env)).status,400);
@@ -258,7 +259,7 @@ test('changed encryption secret is distinguished from an unavailable Dropbox fil
   const share=await create(worker,env);
   env.SHARES_ENCRYPTION_KEY='different-test-only-random-secret-'.repeat(2);
   const config=await worker.fetch(new Request('https://viewer.example.com/api/shares/config'),env);
-  assert.deepEqual(await config.json(),{ enabled:true });
+  assert.equal((await config.json() as any).enabled,true);
   const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);
   const error=await response.json() as any;
   assert.equal(response.status,502);
@@ -468,5 +469,128 @@ test('malformed paths/methods and hostile origins are rejected before any databa
     ['/api/shares/config',{ headers:{ Origin:'https://attacker.example' } },403],
   ] as const) assert.equal((await worker.fetch(new Request(`https://viewer.example.com${path}`,options),env)).status,status);
   assert.equal(reads,0);
+  env.SHARES_DB.db.close();
+});
+
+const ownerHeaders={Authorization:`Bearer ${creatorKey}`};
+async function editLink(worker:ReturnType<typeof createShareWorker>,env:ShareEnvironment,token:string) {
+  const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${token}/edit-link`,{method:'POST',headers:ownerHeaders}),env);
+  assert.equal(response.status,200,await response.clone().text());
+  const data=await response.json() as any;
+  return {url:data.url,token:new URL(data.url).pathname.split('/').at(-1)!};
+}
+function saveRequest(token:string,revision=1,changes:any={}) {
+  return new Request(`https://viewer.example.com/api/shares/${token}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace:workspace(),modelIdentity:'ca'.repeat(32),revision,...changes})});
+}
+test('STL, 3MF and GLB retain format-specific protected streams without model copies',async()=>{
+  const env=environment();
+  const worker=createShareWorker({fetch:async()=>new Response(new Uint8Array([80,75,3,4,0,1]))});
+  for(const [extension,mime] of [['stl','model/stl'],['3mf','model/3mf'],['glb','model/gltf-binary']]) {
+    const share=await create(worker,env,{sourceUrl:`https://www.dropbox.com/scl/fi/synthetic/model.${extension}?rlkey=synthetic`});
+    const response=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.${extension}`),env);
+    assert.equal(response.status,200);assert.equal(response.headers.get('Content-Type'),mime);
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()),new Uint8Array([80,75,3,4,0,1]));
+    assert.equal((await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.obj`),env)).status,404);
+  }
+  const columns=env.SHARES_DB.db.prepare('PRAGMA table_info(shares)').all().map((row:any)=>row.name);
+  assert(!columns.some((name:string)=>/model_bytes|geometry|file_data/.test(name)));
+  env.SHARES_DB.db.close();
+});
+test('only creator-password authorization can reveal an edit link; view metadata cannot reveal it',async()=>{
+  const env=environment(),worker=createShareWorker();const share=await create(worker,env);
+  const path=`https://viewer.example.com/api/shares/${share.token}/edit-link`;
+  assert.equal((await worker.fetch(new Request(path,{method:'POST'}),env)).status,401);
+  assert.equal((await worker.fetch(new Request(path,{method:'POST',headers:{Authorization:'Bearer wrong-password'}}),env)).status,401);
+  const edit=await editLink(worker,env,share.token);
+  assert.notEqual(edit.token,share.token);
+  assert.equal((await editLink(worker,env,share.token)).url,edit.url,'retrieving an edit link must not revoke collaborators');
+  const view=await (await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}`),env)).json() as any;
+  assert.equal(view.role,'view');assert.equal(view.revision,1);assert(!JSON.stringify(view).includes(edit.token));
+  const editable=await (await worker.fetch(new Request(`https://viewer.example.com/api/shares/${edit.token}`),env)).json() as any;
+  assert.equal(editable.role,'edit');assert.equal(editable.viewUrl,share.url);
+  const stored=env.SHARES_DB.db.prepare('SELECT * FROM shares').get() as any;
+  assert.equal(stored.edit_token_hash,await hashToken(edit.token));
+  assert(!JSON.stringify(stored).includes(edit.token));assert(!JSON.stringify(stored).includes(share.token));
+  env.SHARES_DB.db.close();
+});
+test('view links cannot write and edit links atomically save planning plus multi-mesh visibility',async()=>{
+  const env=environment(),worker=createShareWorker();const share=await create(worker,env);const edit=await editLink(worker,env,share.token);
+  assert.equal((await worker.fetch(saveRequest(share.token),env)).status,403);
+  const snapshot={...workspace(),schemaVersion:2,meshes:[{key:'0',vertices:3,indices:3,visible:false,opacity:0},{key:'1',vertices:3,indices:3,visible:true,opacity:0.5}]};
+  const response=await worker.fetch(saveRequest(edit.token,1,{workspace:snapshot}),env);
+  assert.equal(response.status,200);assert.equal((await response.json() as any).revision,2);
+  const view=await (await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}`),env)).json() as any;
+  assert.deepEqual(view.workspace,snapshot);assert.equal(view.revision,2);
+  assert.equal((await worker.fetch(saveRequest(edit.token,1,{workspace:snapshot}),env)).status,409);
+  assert.equal((await worker.fetch(saveRequest(edit.token,2,{sourceUrl:'https://attacker.example/model.stl'}),env)).status,400);
+  assert.equal((await worker.fetch(saveRequest(edit.token,2,{modelIdentity:'ab'.repeat(32)}),env)).status,409);
+  assert.equal((env.SHARES_DB.db.prepare('SELECT revision FROM shares').get() as any).revision,2);
+  env.SHARES_DB.db.close();
+});
+test('concurrent editor saves cannot silently overwrite each other',async()=>{
+  const env=environment(),worker=createShareWorker();const share=await create(worker,env);const edit=await editLink(worker,env,share.token);
+  const responses=await Promise.all([worker.fetch(saveRequest(edit.token,1),env),worker.fetch(saveRequest(edit.token,1),env)]);
+  assert.deepEqual(responses.map(value=>value.status).sort(),[200,409]);
+  assert.equal((env.SHARES_DB.db.prepare('SELECT revision FROM shares').get() as any).revision,2);
+  env.SHARES_DB.db.close();
+});
+test('admin listing is password-protected, paginated and excludes sources, edit tokens and geometry',async()=>{
+  const env=environment(),worker=createShareWorker({now:()=>1_800_000_000_000});
+  let editToken='';for(let i=0;i<26;i++){const share=await create(worker,env,{label:`Workspace ${i}`});if(i===0)editToken=(await editLink(worker,env,share.token)).token;}
+  const path='https://viewer.example.com/api/shares/admin';
+  assert.equal((await worker.fetch(new Request(path),env)).status,401);
+  const first=await (await worker.fetch(new Request(path,{headers:ownerHeaders}),env)).json() as any;
+  assert.equal(first.items.length,25);assert(first.nextCursor);
+  assert(!JSON.stringify(first).includes('dropbox'));assert(!JSON.stringify(first).includes('source_ciphertext'));assert(!JSON.stringify(first).includes(editToken));
+  assert(first.items.every((item:any)=>/^https:\/\/viewer.example.com\/s\/[a-f0-9]{64}$/.test(item.viewUrl)));
+  const second=await (await worker.fetch(new Request(`${path}?before=${first.nextCursor}`,{headers:ownerHeaders}),env)).json() as any;
+  assert.equal(second.items.length,1);assert.equal(second.nextCursor,null);
+  assert(!first.items.some((a:any)=>a.id===second.items[0].id));
+  assert.equal((await worker.fetch(new Request(`${path}?before=invalid`,{headers:ownerHeaders}),env)).status,400);
+  assert.equal((await worker.fetch(new Request(`${path}?url=https://attacker.example`,{headers:ownerHeaders}),env)).status,400);
+  env.SHARES_DB.db.close();
+});
+test('admin expiry edits stay within creation plus 180 days and invalidate stale editor revisions',async()=>{
+  let now=1_800_000_000_000;const env=environment(),worker=createShareWorker({now:()=>now});
+  const share=await create(worker,env),edit=await editLink(worker,env,share.token),id=await hashToken(share.token);now+=86_400_000;
+  const patch=(body:any)=>new Request(`https://viewer.example.com/api/shares/admin/${id}`,{method:'PATCH',headers:{...ownerHeaders,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  assert.equal((await worker.fetch(patch({revision:1,expiresAt:new Date(now+SHARE_LIFETIME_MS).toISOString()}),env)).status,400);
+  assert.equal((await worker.fetch(patch({revision:1,expiresAt:new Date(now-1).toISOString()}),env)).status,400);
+  const expiry=now+86_400_000;
+  const updated=await worker.fetch(patch({revision:1,label:'Reviewed workspace',expiresAt:new Date(expiry).toISOString()}),env);
+  assert.equal(updated.status,200);
+  assert.equal((await worker.fetch(saveRequest(edit.token,1),env)).status,409);
+  assert.equal((await worker.fetch(saveRequest(edit.token,2),env)).status,200);
+  const metadata=await (await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}`),env)).json() as any;
+  assert.equal(metadata.expiresAt,new Date(expiry).toISOString());
+  now=expiry;
+  assert.equal((await worker.fetch(saveRequest(edit.token,3),env)).status,404);
+  assert.equal((await worker.fetch(new Request(`https://viewer.example.com/api/shares/${edit.token}/model.stl`),env)).status,404);
+  env.SHARES_DB.db.close();
+});
+test('admin revocation disables view and edit capabilities immediately',async()=>{
+  const env=environment(),worker=createShareWorker();const share=await create(worker,env),edit=await editLink(worker,env,share.token);
+  const path=`https://viewer.example.com/api/shares/admin/${await hashToken(share.token)}`;
+  assert.equal((await worker.fetch(new Request(path,{method:'DELETE'}),env)).status,401);
+  assert.equal((await worker.fetch(new Request(path,{method:'DELETE',headers:ownerHeaders}),env)).status,204);
+  for(const token of [share.token,edit.token])for(const suffix of ['','/model.stl'])assert.equal((await worker.fetch(new Request(`https://viewer.example.com/api/shares/${token}${suffix}`),env)).status,404);
+  assert.equal((await worker.fetch(saveRequest(edit.token),env)).status,404);
+  const issued=await worker.fetch(new Request(`${path}/edit-link`,{method:'POST',headers:ownerHeaders}),env);assert.equal(issued.status,404);
+  env.SHARES_DB.db.close();
+});
+test('legacy databases keep viewing/creation working and enable editing only after the additive migration',async()=>{
+  const env=environment();env.SHARES_DB.db.close();env.SHARES_DB=new TestDatabase(false);
+  const worker=createShareWorker({fetch:async()=>new Response('solid synthetic\nendsolid synthetic')});
+  const share=await create(worker,env);
+  const config=await (await worker.fetch(new Request('https://viewer.example.com/api/shares/config'),env)).json() as any;
+  assert.equal(config.enabled,true);assert.equal(config.editingEnabled,false);
+  assert.equal((await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}`),env)).status,200);
+  const model=await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/model.stl`),env);assert.equal(model.status,200);await model.body?.cancel();
+  assert.equal((await worker.fetch(new Request(`https://viewer.example.com/api/shares/${share.token}/edit-link`,{method:'POST',headers:ownerHeaders}),env)).status,503);
+  env.SHARES_DB.db.exec(readFileSync(new URL('../migrations/0002_editable_workspaces.sql',import.meta.url),'utf8'));
+  const edit=await editLink(worker,env,share.token);
+  assert.equal((await worker.fetch(saveRequest(edit.token,1),env)).status,200);
+  const listing=await (await worker.fetch(new Request('https://viewer.example.com/api/shares/admin',{headers:ownerHeaders}),env)).json() as any;
+  assert.equal(listing.items[0].viewUrl,share.url);
   env.SHARES_DB.db.close();
 });

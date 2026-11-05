@@ -1,12 +1,18 @@
 # Implementation status for the testing PR
 
-Updated: 4 November 2026. This is a draft implementation for review and isolated
+Updated: 5 November 2026. This is a draft implementation for review and isolated
 preview testing. It has not been approved for merge into beta or main.
 
 The [implementation plan](PERFORMANCE_PLAN.md) remains the requested scope. The
 [testing matrix](TESTING.md) defines evidence required for acceptance. This file
 records implementation/evidence separately so an existing code path or a passing
 unit test is not described as complete runtime acceptance.
+
+## Protected-workspace extension
+
+The test branch adds self-contained Dropbox 3MF/GLB sharing alongside STL, per-mesh visibility/opacity, explicit revision-checked saves through separate edit links, creator-password authorization for edit-link sharing, and `/admin/shares` for labels, bounded expiry and revocation. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for the additive D1 migration and phone setup.
+
+Local SQLite-backed tests cover permissions, save races, migration compatibility, pagination and expiry. A real local Worker/D1/Chromium check covers admin login, fresh-password authorization, edit saves, conflicts, labels, expiry cap, revocation and no persistent credentials. Package tests cover multi-object 3MF, unsafe references/entities and actual expanded-byte limits. Physical-device 3MF rendering/state acceptance and the Slicer gates below remain required.
 
 ## Scope represented in this PR
 
@@ -43,7 +49,7 @@ binding steps. Test/beta/main resources must remain separate.
 
 ## Explicit limits and deferred work
 
-- Protected sharing initially targets an approved remote STL source. Local-only
+- Protected sharing supports approved, self-contained remote STL/3MF/GLB sources. Local-only
   files and custom/local meshes cannot be reconstructed on another device from
   metadata alone; they must be rejected with a useful explanation. Ordinary
   local-viewer and ZIP workflows retain their existing format support.
