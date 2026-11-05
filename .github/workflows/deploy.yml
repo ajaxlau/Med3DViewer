@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test Worker downloads in the Cloudflare runtime
+        run: node scripts/test-worker-runtime.mjs
+
       - name: Build the Cloudflare Workers artifact
         run: npm run build:cloudflare
 

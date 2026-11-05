@@ -96,6 +96,8 @@ The creator key is memory-only and cleared when the dialog closes; shared snapsh
 
 ### Dropbox downloads but the protected link fails
 
+The Worker uses `cache: 'no-store'` alone for source downloads. Combining it with `cf.cacheTtl: 0` makes the Workers runtime throw before contacting Dropbox, producing `SOURCE_FETCH_FAILED` even when the file is available. An offline workerd regression now exercises the actual download handler with GET, HEAD, Range and redirects. Run it locally with `node scripts/test-worker-runtime.mjs`; CI runs it too. This fix needs no D1 migration or secret changes.
+
 The Worker follows Dropbox's documented `/s/dl` and `/s/raw` redirects on Dropbox-owned HTTPS hosts, plus its approved download-content hosts. Each redirect is checked before fetching; login pages, unrelated hosts, credentials and non-default ports are rejected. No recipient cookies or creator credentials are forwarded to Dropbox. See [Dropbox's download-redirect documentation](https://help.dropbox.com/share/force-download).
 
 The viewer shows a fixed diagnostic code instead of exposing Dropbox's response, source address or access parameters. After the latest test deployment, reopen the protected link in a new Private/Incognito window. If it fails, report only the displayed error code and message:

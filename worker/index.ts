@@ -260,9 +260,10 @@ async function streamModel(request: Request, record: ShareRecord, env: ShareEnvi
     timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 180_000);
     let upstream: Response | undefined;
     for (let redirects = 0; redirects <= 3; redirects++) {
+      // no-store already bypasses Cloudflare caching. A conflicting cf.cacheTtl
+      // (including 0) throws in workerd before any request reaches Dropbox.
       upstream = await upstreamFetch(source.href, {
         method: request.method === 'HEAD' ? 'HEAD' : 'GET', headers, redirect: 'manual', signal: controller.signal, cache: 'no-store',
-        ...({ cf: { cacheTtl: 0, cacheEverything: false } } as unknown as RequestInit),
       });
       pendingBody = upstream.body;
       if (![301,302,303,307,308].includes(upstream.status)) break;
