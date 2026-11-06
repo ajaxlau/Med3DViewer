@@ -101,7 +101,7 @@ For that exact notice, use this order:
 3. Confirm the new beta deployment has the Worker script plus assets. Open `/api/shares/config` in a new Private window: JSON with `enabled: false` is expected while the required secrets are missing. Protected creation, reads and saves fail closed until both secrets are configured; do not copy test keys to bypass this step.
 4. Return to **beta → Settings → Variables and Secrets** and add the two secrets below. Save/deploy the secret changes on beta, then recheck `/api/shares/config` for `enabled: true` and `historyEnabled: true`.
 
-If the secret control is still disabled after that new Worker deployment, report its current notice. Do not move the secrets to Production or Previews Base as a workaround.
+The owner confirmed this assets-only notice persists even after the beta backend deployment, although its API returns JSON. Do not assume another refresh will unlock the editor. Use the [Codespaces browser-terminal procedure](BETA_CODESPACES_SECRETS.md), which sets secrets on the existing beta Preview through Wrangler. Do not move the secrets to Production or Previews Base as a workaround.
 
 These are **runtime** secrets, not build variables, GitHub secrets or the Cloudflare build token:
 
