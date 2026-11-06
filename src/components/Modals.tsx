@@ -1,108 +1,19 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { useUserSession } from '../context/UserSessionContext';
-import { defaultWorkspaceName, localDateTime, workspaceExpiry, WORKSPACE_MAX_AGE_MS } from '../lib/workspaceSharing';
+import { ModelShareDialog } from './ModelShareDialog';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { QRCodeSVG } from 'qrcode.react';
 import { loadZip } from '../lib/loadZip';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
-import logoImg from '../assets/logo.png';
 import { GpuStatusModal } from './GpuStatusModal';
 const InfoModal = lazy(() => import('./InfoModal').then(module => ({ default: module.InfoModal })));
 import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
-import { shareWorkspaceWithSession, createProtectedShare } from '../lib/sharedWorkspace';
 
 
 export function Modals() {
   const { activeModal, setActiveModal, filename, loadedUrl, isEmpty, resetWorkspace } = useViewer();
 
-  const auth=useUserSession();
-  const canShareWorkspace=auth.hasPermission('workspace:share');
-
   // URL Modal state
   const [urlInput, setUrlInput] = useState('');
-
-  // Share state based on preview mode (blob) vs deployed
-  const [shareVal, setShareVal] = useState('');
-  const [isSandbox, setIsSandbox] = useState(false);
-  const [protectedEnabled, setProtectedEnabled] = useState(false);
-  const [creatingShare, setCreatingShare] = useState(false);
-  const [protectedError, setProtectedError] = useState('');
-  const [protectedExpiry, setProtectedExpiry] = useState<string | null>(null);
-  const [isProtectedLink, setIsProtectedLink] = useState(false);
-
-
-  const [includeWorkspace,setIncludeWorkspace]=useState(false);
-
-  const [historyEnabled,setHistoryEnabled]=useState(false);
-  const [existingToken,setExistingToken]=useState<string|null>(null);
-
-
-  const [workspaceLabel,setWorkspaceLabel]=useState('');
-  const [workspaceExpiresAt,setWorkspaceExpiresAt]=useState(()=>localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS));
-  const existingModelOnly=!!existingToken&&window._viewerManagerInstance?.sharedWorkspaceIncludesPlanning===false;
-  const shareAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (activeModal !== 'share') {
-      shareAbortRef.current?.abort();
-      
-      setCreatingShare(false);
-      return;
-    }
-    const controller = new AbortController();
-    setProtectedEnabled(false);
-    void fetch('/api/shares/config', { signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' })
-      .then(async response => response.ok ? response.json() : null)
-      .then(value => { if (!controller.signal.aborted) {setProtectedEnabled(value?.enabled === true);setHistoryEnabled(value?.historyEnabled===true);} })
-      .catch(() => { /* No direct-source fallback: sharing stays unavailable until configured. */ });
-    return () => controller.abort();
-  }, [activeModal]);
-
-  useEffect(() => {
-    // A link being created for an older model must not appear beside a new one.
-    return () => { shareAbortRef.current?.abort(); };
-  }, [loadedUrl]);
-
-  useEffect(()=>{
-    if(!canShareWorkspace&&includeWorkspace&&!existingToken){shareAbortRef.current?.abort();setCreatingShare(false);setIncludeWorkspace(false);setShareVal('');setIsProtectedLink(false);}
-  },[canShareWorkspace]);
-
-  const handleCreateProtectedShare = async () => {
-    const manager = window._viewerManagerInstance;
-    if (!manager || !loadedUrl || creatingShare) return;
-    setProtectedError('');
-    const controller = new AbortController();
-    shareAbortRef.current = controller;
-    setCreatingShare(true);
-    try {
-      const url = new URL(loadedUrl, window.location.origin);
-      if (url.origin === window.location.origin && url.pathname.startsWith('/api/shares/') && !(existingModelOnly&&includeWorkspace)) {
-        throw new Error('Open the public workspace and use Save workspace to save changes.');
-      }
-      if (!(existingModelOnly&&includeWorkspace) && (!/^https:$/.test(url.protocol) || !/\.(?:stl|3mf|glb)$/i.test(url.pathname))) {
-        throw new Error('Protected sharing supports self-contained Dropbox STL, 3MF and GLB files.');
-      }
-      if(includeWorkspace&&(!canShareWorkspace||!workspaceLabel.trim()))throw new Error('Log in and enter a workspace name before sharing.');
-      if(manager.loadedModelShareable===false)throw new Error('This model has external or unsupported resources. Export a self-contained 3MF or GLB before protected sharing.');
-      const result = await createProtectedShare({
-        ...(existingModelOnly&&includeWorkspace?{sourceShareToken:existingToken!}:{sourceUrl:loadedUrl}),
-        workspace: manager.exportShareWorkspace(),
-        modelIdentity: manager.loadedModelIdentity || '',label:includeWorkspace?workspaceLabel.trim():undefined,includeWorkspace,...(includeWorkspace?{expiresAt:workspaceExpiry(workspaceExpiresAt)}:{}),
-      }, '', controller.signal);
-      if (controller.signal.aborted) return;
-      setShareVal(result.url);
-      setIsProtectedLink(true);
-      setProtectedExpiry(result.expiresAt);
-      
-    } catch (error) {
-      if(!controller.signal.aborted&&error instanceof Error&&error.name==='LoginRequiredError')auth.requireLogin();
-      if (!controller.signal.aborted) setProtectedError(error instanceof Error ? error.message : 'The protected share could not be created.');
-    } finally {
-      if (!controller.signal.aborted) setCreatingShare(false);
-      if (shareAbortRef.current === controller) shareAbortRef.current = null;
-    }
-  };
 
   // Snapshot modal states
   const [snapRes, setSnapRes] = useState('medium');
@@ -116,32 +27,6 @@ export function Modals() {
   const [shareFeedback, setShareFeedback] = useState('');
 
   useEffect(() => {
-    if (activeModal === 'share') {
-      let baseUrl = window.location.href.split('#')[0].split('?')[0];
-      if (window.location.pathname.startsWith('/s/')) baseUrl = `${window.location.origin}/`;
-      setProtectedError(''); setProtectedExpiry(null); setIsProtectedLink(false);  setCreatingShare(false);
-      setIncludeWorkspace(false);setWorkspaceLabel(defaultWorkspaceName(filename));setWorkspaceExpiresAt(localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS));setExistingToken(null);setShareVal('');
-      const isSandboxUrl = baseUrl.startsWith('blob:') || baseUrl.includes('.webcomponent.local') || window.location.hostname === 'localhost' || window.location.hostname.includes('.run.app');
-      setIsSandbox(isSandboxUrl);
-      
-      if (!isEmpty && loadedUrl) {
-         const currentModelUrl = new URL(loadedUrl, window.location.origin);
-         const protectedMatch = /^\/api\/shares\/([a-f0-9]{64})\/model\.(?:stl|3mf|glb)$/.exec(currentModelUrl.pathname);
-         if (currentModelUrl.origin === window.location.origin && protectedMatch) {
-           const manager=window._viewerManagerInstance;
-           const viewUrl=manager?.sharedWorkspaceViewUrl||`${window.location.origin}/s/${protectedMatch[1]}`;
-           setExistingToken(protectedMatch[1]);setIncludeWorkspace(manager?.sharedWorkspaceIncludesPlanning!==false);
-           setShareVal(manager?.sharedWorkspaceIncludesPlanning===false?viewUrl:'');
-           setIsProtectedLink(true);
-           setProtectedExpiry(window._viewerManagerInstance?.sharedWorkspaceExpiresAt || null);
-         } else {
-           setShareVal('');
-         }
-      } else {
-         setShareVal('');
-      }
-    }
-    
     if (activeModal === 'snapshot' && window._viewerManagerInstance && !isEmpty) {
       // Create a quick preview render
       const container = document.getElementById('viewer-container');
@@ -163,37 +48,6 @@ export function Modals() {
       window._viewerManagerInstance.loadUrl(urlInput.trim());
       setUrlInput('');
       setActiveModal(null);
-    }
-  };
-
-  const [copied, setCopied] = useState(false);
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } else {
-        throw new Error("Clipboard API not available");
-      }
-    } catch (err) {
-      // Fallback
-      const textArea = document.createElement("textarea");
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.top = '-999999px';
-      textArea.style.left = '-999999px';
-      document.body.appendChild(textArea);
-      textArea.select();
-      try {
-        document.execCommand('copy');
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (e) {
-        console.warn("Failed to copy", e);
-      }
-      document.body.removeChild(textArea);
     }
   };
 
@@ -350,6 +204,7 @@ export function Modals() {
   };
 
   if (!activeModal || activeModal === 'planning') return null;
+  if (activeModal === 'share') return <ModelShareDialog onClose={()=>setActiveModal(null)} />;
 
   if (activeModal === 'info') {
     return <Suspense fallback={<div role="status" className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"><div className="rounded bg-white dark:bg-zinc-900 p-6 text-sm">Loading guide… <button className="ml-3 min-h-11 underline" onClick={() => setActiveModal(null)}>Close</button></div></div>}><InfoModal onClose={() => setActiveModal(null)} /></Suspense>;
@@ -425,127 +280,6 @@ export function Modals() {
               <button className="px-5 py-2.5 rounded-sm text-xs font-bold uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-700 border-none" onClick={handleLoadUrl}>Load</button>
             </div>
           </>
-        )}
-
-        {/* -- SHARE MODAL -- */}
-        {activeModal === 'share' && (
-           <>
-            <h3 className="text-[11px] uppercase tracking-widest font-bold mb-3 text-zinc-800 dark:text-zinc-200">Share Model</h3>
-            {!loadedUrl ? (
-                <p className="text-sm text-red-500 mb-5 font-mono">Please load a model from a URL first before sharing. Local files cannot be shared via link.</p>
-            ) : (
-                <>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">
-                  {isSandbox && <><strong className="text-red-500">Preview Mode:</strong> You are in a temporary sandbox. Once deployed, it will look like this:<br/><br/></>}
-                  Public links conceal the Dropbox source address. Recipients need no password to view or save when editing is enabled. Changes are published only by clicking Save workspace.
-                </p>
-                {shareVal ? <div className="flex flex-col gap-4 mb-6">
-                  <div className="bg-white p-4 rounded-md border border-zinc-200 dark:border-zinc-800 mx-auto shadow-sm flex items-center justify-center relative">
-                    <QRCodeSVG 
-                      value={shareVal} 
-                      size={168} 
-                      level={"H"} 
-                      imageSettings={{
-                        src: logoImg,
-                        x: undefined,
-                        y: undefined,
-                        height: 38,
-                        width: 38,
-                        excavate: true,
-                      }}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <img 
-                        src={logoImg} 
-                        alt="3DPO Logo" 
-                        className="w-[36px] h-[36px] object-contain"
-                      />
-                    </div>
-                  </div>
-                  <input readOnly value={shareVal} className="w-full p-3 border border-zinc-300 dark:border-zinc-700 rounded-sm bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-mono text-sm outline-none" />
-                </div> : <p className="mb-4 text-xs">Create a public link below. The Dropbox source address will not appear in the link.</p>}
-                </>
-            )}
-            {protectedExpiry && <p className="text-xs mb-3 text-zinc-600 dark:text-zinc-300">Expires {new Date(protectedExpiry).toLocaleString()}. The source host must remain available. Downloaded copies cannot be recalled.</p>}
-            {protectedEnabled && loadedUrl && (!existingToken||(existingModelOnly&&canShareWorkspace)) && (
-              <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 mt-4 space-y-3">
-                <p className="text-xs">Public model links conceal the Dropbox source. Workspace links also include analytics, mesh state and revision history.</p>
-                {canShareWorkspace?<label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={includeWorkspace} disabled={!historyEnabled||creatingShare} onChange={event=>{setIncludeWorkspace(event.target.checked);setShareVal(!event.target.checked&&existingModelOnly?`${window.location.origin}/s/${existingToken}`:'');setIsProtectedLink(!event.target.checked&&existingModelOnly);setProtectedExpiry(!event.target.checked&&existingModelOnly?window._viewerManagerInstance?.sharedWorkspaceExpiresAt||null:null);}}/>Share workspace</label>:<p className="text-xs"><button className="min-h-11 text-blue-600 underline" onClick={auth.openLogin}>Log in</button> to share a workspace. Public model sharing remains available.</p>}
-                {!historyEnabled&&<p className="text-xs">Workspace sharing is unavailable until database setup is complete.</p>}
-                {includeWorkspace&&canShareWorkspace&&<>
-                  <label className="block text-sm">Workspace name<input aria-label="Workspace name" required value={workspaceLabel} maxLength={128} onChange={event=>setWorkspaceLabel(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
-                  <label className="block text-sm">Expiry date and time<input aria-label="Workspace sharing expiry" type="datetime-local" required value={workspaceExpiresAt} min={localDateTime(Date.now()+60_000)} max={localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS)} onChange={event=>setWorkspaceExpiresAt(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
-                  <p className="text-xs">Up to 180 days from creation. Recipients need no login to view revisions or save analytics and show/hide/opacity changes when editing is enabled.</p>
-                </>}
-                {!includeWorkspace&&<p className="text-xs">Model only: analytics and revision history are excluded.</p>}
-                {(!existingToken||includeWorkspace)&&<button disabled={creatingShare||!historyEnabled||(includeWorkspace&&(!canShareWorkspace||!workspaceLabel.trim()||!workspaceExpiresAt))} onClick={handleCreateProtectedShare} className="min-h-11 rounded bg-blue-600 px-4 text-xs font-semibold text-white disabled:opacity-50">{creatingShare?'Creating…':includeWorkspace?'Create workspace link':'Create public model link'}</button>}
-              </div>
-            )}
-            {isProtectedLink&&includeWorkspace&&!shareVal&&existingToken&&<div className="my-3 space-y-3">
-              {canShareWorkspace?<button disabled={creatingShare} className="min-h-11 rounded bg-blue-600 px-4 text-sm text-white disabled:opacity-50" onClick={()=>{
-                if(creatingShare)return;const controller=new AbortController();shareAbortRef.current=controller;setCreatingShare(true);setProtectedError('');
-                void shareWorkspaceWithSession(existingToken,controller.signal).then(url=>{if(!controller.signal.aborted)setShareVal(url);}).catch(reason=>{if(!controller.signal.aborted){if(reason instanceof Error&&reason.name==='LoginRequiredError')auth.requireLogin();setProtectedError(reason instanceof Error?reason.message:'Sharing failed.');}}).finally(()=>{if(!controller.signal.aborted)setCreatingShare(false);});
-              }}>Share workspace</button>:<button className="min-h-11 rounded bg-blue-600 px-4 text-sm text-white" onClick={auth.openLogin}>Log in to share this workspace</button>}
-            </div>}
-            {!protectedEnabled&&loadedUrl&&!isProtectedLink&&<p className="text-sm">Public sharing is unavailable on this environment. The source address will not be shared.</p>}
-            {protectedEnabled&&<a href="/admin/shares" target="_blank" rel="noopener noreferrer" className="my-2 inline-block min-h-11 content-center text-sm text-blue-600 underline">Manage protected workspaces</a>}
-
-            {protectedError && <p role="alert" className="mt-3 text-xs text-red-600 dark:text-red-300">{protectedError}</p>}
-            <div className="flex justify-end items-center gap-3 mt-6 w-full">
-              <button 
-                className="flex-1 max-w-[120px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest border border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center text-center font-bold" 
-                onClick={() => setActiveModal(null)}
-              >
-                Close
-              </button>
-              {loadedUrl && shareVal && (
-                <>
-                  {activeModal === 'share' && (
-                      <button 
-                        className="flex-1 max-w-[130px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest bg-green-600 text-white hover:bg-green-700 border-none shadow-sm transition-colors flex items-center justify-center gap-1.5 text-center font-bold" 
-                        onClick={async () => {
-                            let sharedOk = false;
-                            const shareText = shareVal;
-                            if (window._viewerManagerInstance) {
-                                try {
-                                    const dataUrl = window._viewerManagerInstance.captureSnapshot(1920, 1080, false);
-                                    if (dataUrl && navigator.canShare) {
-                                        const blob = dataURIToBlob(dataUrl);
-                                        const dlName = filename || 'snapshot';
-                                        const file = new File([blob], `${dlName.replace(/\.[^/.]+$/, "")}_snapshot.png`, { type: 'image/png' });
-                                        if (navigator.canShare({ files: [file] })) {
-                                            await navigator.share({
-                                                title: '3D Model',
-                                                text: shareText,
-                                                files: [file]
-                                            });
-                                            sharedOk = true;
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn('Share with image failed', e);
-                                }
-                            }
-                            if (!sharedOk) {
-                                const url = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-                                safeOpenWindow(url);
-                            }
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                        <span className="truncate">WhatsApp</span>
-                      </button>
-                  )}
-                  <button 
-                    className="flex-1 max-w-[130px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-700 border-none shadow-sm transition-colors flex items-center justify-center text-center font-bold" 
-                    onClick={() => copyToClipboard(shareVal)}
-                  >
-                    <span className="truncate">{copied ? "Copied!" : "Copy Link"}</span>
-                  </button>
-                </>
-              )}
-            </div>
-           </>
         )}
 
         {/* -- SNAPSHOT MODAL -- */}

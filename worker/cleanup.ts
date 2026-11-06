@@ -21,6 +21,12 @@ export async function cleanupExpiredShares(env: CleanupEnvironment, timestamp = 
     const result = await env.SHARES_DB!.prepare('DELETE FROM shares WHERE token_hash IN (SELECT token_hash FROM shares WHERE expires_at<=? OR revoked_at IS NOT NULL LIMIT 100)').bind(timestamp).run();
     if ((result.meta?.changes || 0) < 100) break;
   }
+  for(let batch=0;batch<10;batch++) {
+    const result=await env.SHARES_DB!.prepare(`DELETE FROM shares WHERE token_hash IN (
+      SELECT child.token_hash FROM shares child WHERE child.owner_ref LIKE 'model-from:%'
+      AND NOT EXISTS(SELECT 1 FROM shares parent WHERE parent.token_hash=substr(child.owner_ref,12,64) AND parent.expires_at>? AND parent.revoked_at IS NULL) LIMIT 100)`).bind(timestamp).run();
+    if((result.meta?.changes||0)<100)break;
+  }
   await env.SHARES_DB!.prepare('DELETE FROM share_rate_limits WHERE bucket IN (SELECT bucket FROM share_rate_limits WHERE expires_at<=? LIMIT 1000)').bind(timestamp).run();
 
 }

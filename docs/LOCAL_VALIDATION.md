@@ -42,3 +42,12 @@ At that initial stage, protected sharing was limited to Dropbox STL with procedu
 - Actual local Chromium/Worker/D1 passed front-page login, page-reload session persistence, password-free guest model sharing, mobile workspace-name/expiry inputs, and cookie visibility checks. The guest recipient saved measurement definitions and mesh show/hide/opacity after the publisher logged out, then restored an older revision and encountered a stale-save conflict from another tab.
 - Recipient controls start collapsed, show the revision number even when the name truncates, and fetch no revision list until expanded. The mobile test verifies scrolling and no horizontal overflow. Sessions/credentials are absent from application localStorage/sessionStorage.
 - The model geometry is a synthetic state fixture; real 3MF parsing and physical iOS/Android GPU/Slicer acceptance remain separate checks. Browser service workers were blocked for the isolated harness. The normal API navigation denylist remains covered independently.
+
+
+## Legacy share screen refinement (6 November 2026)
+
+- The guest share screen retains the legacy instruction, QR, link field and Close/WhatsApp/Copy Link controls. Its protected model address is prepared automatically. Only signed-in users see the workspace checkbox; checking it prompts for new workspace name/expiry as needed.
+- The header user icon uses the existing 18 px icon style beside Analytic Tools. Login/account windows have only the relevant fields/actions and error feedback; the explanatory share/login paragraphs and admin link are removed from the share window.
+- Real local Chromium/Worker/D1 verified guest and signed-in layouts, desktop/mobile placement, clipboard-ready protected URLs, cached link reuse across dialog reopening/browser reload, expired-session login, name/expiry creation and guest saves. Model-only links projected from workspaces omit analytic/display metadata and inherit expiry/revocation; SQLite tests cover concurrent reuse and cleanup.
+- Model-only references capture the model frame without exporting planning objects. The per-viewer in-memory cache is capped at eight entries and stores metadata only. Existing schema 3, bindings and secrets are reused; no migration is added.
+- Browser geometry remains a synthetic model-state fixture, with external services blocked and service workers disabled for isolation. Real model/device/Slicer acceptance remains required.

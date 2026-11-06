@@ -4,12 +4,12 @@ This flow uses the sharing accounts already assigned in **/admin/shares → Shar
 
 ## Publish a workspace
 
-1. Click **Log in** on the viewer's front page. Enter your assigned sharing username and password in the small login window.
+1. Click the **user icon** beside Analytic Tools in the header. Enter your assigned sharing username and password in the small login window.
 2. Load a supported self-contained Dropbox STL, 3MF or GLB, or open an existing public model-only link, then open **Share model**. The source stays concealed when creating a workspace from a model-only link.
-3. Select **Share workspace**, enter its **Workspace name** and **Expiry date and time**, then create the link. Expiry must be in the future and at most 180 days from creation.
-4. Share the generated QR/address through the existing Copy Link or WhatsApp controls. The original Dropbox address is excluded.
+3. After login, select **Share workspace**, enter its **Workspace name** and **Expiry Date**, then create the link. Expiry must be in the future and at most 180 days from creation.
+4. Share the generated QR/address through the existing Copy Link or WhatsApp controls. The original Dropbox address is excluded. Model-only links are reused across dialog openings and browser reloads to avoid duplicate metadata records; reuse does not renew their expiry. A model-only address derived from a workspace omits its analytics and inherits that workspace’s expiry and revocation.
 
-Without login, the current public model-only flow remains available and excludes analytics/revision history. Re-sharing an existing workspace uses the current login and keeps its original address, name, history and expiry; the admin manager controls changes to existing names/deadlines.
+Without login, Share keeps the legacy screen: its instruction, QR code, protected address, Close, WhatsApp and Copy Link. The link is prepared automatically. The workspace checkbox appears only after login. With the checkbox selected, re-sharing an existing workspace uses the current login and keeps its original address, name, history and expiry; the admin manager controls changes to existing names/deadlines.
 
 ## Open and update a shared workspace
 

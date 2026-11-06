@@ -42,7 +42,7 @@ export function Header({
   } = useViewer();
 
   return (
-    <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900 z-30 relative shrink-0 md:flex md:h-16 md:justify-between md:px-6 md:py-0">
+    <header className="flex flex-col items-center justify-between gap-3 md:flex-row md:gap-0 border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900 z-30 relative shrink-0 md:flex md:h-16 md:justify-between md:px-6 md:py-0">
       <div className="flex min-w-0 items-center gap-3 font-bold text-[14px] text-zinc-800 dark:text-zinc-100 font-display tracking-tight text-base md:text-lg">
         <img
           src="/3DPO_Small_Logo.png"
@@ -54,7 +54,7 @@ export function Header({
         </span>
       </div>
 
-      <div className="col-span-2 row-start-2 flex items-center gap-1.5 flex-wrap w-full md:w-auto justify-start md:justify-end text-zinc-500 dark:text-zinc-400">
+      <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap w-full md:w-auto justify-start md:justify-end text-zinc-500 dark:text-zinc-400">
         <Tooltip content="Load from URL">
           <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('url')}>
             <Link size={18} />
@@ -117,14 +117,15 @@ export function Header({
 
         <Tooltip content="Analytic Tools">
           <button
+            aria-label="Analytic Tools"
             className={`hidden sm:flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`}
             onClick={() => setActiveModal(activeModal === 'planning' ? null : 'planning')}
           >
             <PenTool size={18} />
           </button>
         </Tooltip>
+        <UserLogin />
       </div>
-      <div className="col-start-2 row-start-1 text-zinc-600 dark:text-zinc-300"><UserLogin /></div>
     </header>
   );
 }

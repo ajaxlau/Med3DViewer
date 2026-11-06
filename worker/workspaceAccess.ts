@@ -4,6 +4,10 @@ export const HISTORY_VERSION_LIMIT = 20;
 const encoder = new TextEncoder();
 const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes as ArrayBuffer), b => b.toString(16).padStart(2,'0')).join('');
 export const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(32)));
+export async function modelShareKey(source:string,identity:string,snapshot:string,secret:string):Promise<string> {
+  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  return hex(await crypto.subtle.sign('HMAC',key,encoder.encode(`Med3D model share v1\0${source}\0${identity}\0${snapshot}`)));
+}
 export function validWorkspacePassword(value: unknown): value is string {
   return typeof value === 'string' && value.length >= 12 && value.length <= 128 && !/[\u0000-\u001f\u007f]/.test(value);
 }

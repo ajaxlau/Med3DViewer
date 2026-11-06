@@ -29,10 +29,10 @@ async function ensureUser(worker:ReturnType<typeof createShareWorker>,env:ShareE
   const response=await worker.fetch(request('/api/shares/admin/users','POST',{username:'sharer.one',password},admin),env);
   assert.equal(response.status,201,await response.clone().text());
 }
-async function create(worker:ReturnType<typeof createShareWorker>,env:ShareEnvironment,includeWorkspace=true){
+async function create(worker:ReturnType<typeof createShareWorker>,env:ShareEnvironment,includeWorkspace=true,sourceSuffix=""){
   if(includeWorkspace)await ensureUser(worker,env);
-  const response=await worker.fetch(request('/api/shares','POST',{sourceUrl:'https://www.dropbox.com/scl/fi/synthetic/model.3mf?rlkey=secret-source',modelIdentity:identity,workspace:workspace(),label:'Test workspace',includeWorkspace,...(includeWorkspace?{sharingUsername:'sharer.one',sharingPassword:password}:{})}),env);
-  assert.equal(response.status,201,await response.clone().text());return response.json() as Promise<any>;
+  const response=await worker.fetch(request('/api/shares','POST',{sourceUrl:`https://www.dropbox.com/scl/fi/synthetic${sourceSuffix}/model.3mf?rlkey=secret-source`,modelIdentity:identity,workspace:workspace(),label:'Test workspace',includeWorkspace,...(includeWorkspace?{sharingUsername:'sharer.one',sharingPassword:password}:{})}),env);
+  assert([201,...(!includeWorkspace?[200]:[])].includes(response.status),await response.clone().text());return response.json() as Promise<any>;
 }
 function save(token:string,revision:number,author='Editor One',hidden=false){return request(`/api/shares/${token}`,'PUT',{workspace:workspace(hidden),modelIdentity:identity,revision,author});}
 
@@ -160,8 +160,8 @@ test('public creation and sharing-password guessing are rate limited before expe
     const share=await create(worker,env);
     for(let i=0;i<4;i++)assert.equal((await worker.fetch(request(`/api/shares/${share.token}/share-link`,'POST',{username:'sharer.one',password:'incorrect-password'}),env)).status,401);
     assert.equal((await worker.fetch(request(`/api/shares/${share.token}/share-link`,'POST',{username:'sharer.one',password}),env)).status,429);
-    for(let i=0;i<5;i++)await create(worker,env,false);
-    const denied=await worker.fetch(request('/api/shares','POST',{includeWorkspace:false}),env);assert.equal(denied.status,429);
+    for(let i=0;i<5;i++)await create(worker,env,false,`-rate-${i}`);
+    const denied=await worker.fetch(request('/api/shares','POST',{sourceUrl:'https://dl.dropboxusercontent.com/another.stl',modelIdentity:identity,workspace:workspace(),includeWorkspace:false}),env);assert.equal(denied.status,429);
   }finally{env.SHARES_DB.db.close();}
 });
 
@@ -290,5 +290,40 @@ test('sessions expire in eight hours and their cleanup leaves permanent workspac
     await cleanupExpiredShares(env,now);
     assert.equal((env.SHARES_DB.db.prepare("SELECT count(*) AS n FROM share_rate_limits WHERE bucket LIKE 'session:%'").get() as any).n,0);
     assert.equal((await worker.fetch(request(`/api/shares/${share.token}/revisions`),env)).status,200);
+  }finally{env.SHARES_DB.db.close();}
+});
+
+test('automatic model links are reused without duplicate records, quota writes or lifetime extension',async()=>{
+  let now=1_800_000_000_000;const {env}=setup(),worker=createShareWorker({now:()=>now});
+  try{
+    const first=await create(worker,env,false);now+=60_000;
+    for(let i=0;i<6;i++){const reused=await create(worker,env,false);assert.equal(reused.token,first.token);assert.equal(reused.expiresAt,first.expiresAt);}
+    assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM shares').get() as any).n,1);
+    assert.equal((env.SHARES_DB.db.prepare("SELECT SUM(count) AS n FROM share_rate_limits WHERE bucket LIKE 'create:%'").get() as any).n,1);
+    const owner=(env.SHARES_DB.db.prepare('SELECT owner_ref FROM shares').get() as any).owner_ref;assert.match(owner,/^public-model:[a-f0-9]{64}$/);assert(!owner.includes('dropbox'));
+  }finally{env.SHARES_DB.db.close();}
+});
+test('concurrent automatic share requests create one reusable protected model record',async()=>{
+  const {env,worker}=setup();try{
+    const [first,second]=await Promise.all([create(worker,env,false),create(worker,env,false)]);
+    assert.equal(first.token,second.token);assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM shares').get() as any).n,1);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('a workspace model-only projection hides analytic metadata and inherits parent expiry and revocation',async()=>{
+  let now=1_800_000_000_000;const {env}=setup(),worker=createShareWorker({now:()=>now});
+  try{
+    const parent=await create(worker,env),id=await hashToken(parent.token);now+=60_000;
+    const body={sourceShareToken:parent.token,modelIdentity:identity,workspace:workspace(true),includeWorkspace:false};
+    const response=await worker.fetch(request('/api/shares','POST',body),env);assert.equal(response.status,201);const child=await response.json() as any;
+    assert.notEqual(child.token,parent.token);assert.equal(child.expiresAt,parent.expiresAt);
+    const metadata=await (await worker.fetch(request(`/api/shares/${child.token}`),env)).json() as any;
+    assert.equal(metadata.includeWorkspace,false);assert.equal(metadata.workspaceName,'');assert.equal(metadata.workspace.meshes,undefined);assert.deepEqual(metadata.workspace.objects,[]);assert(!JSON.stringify(metadata).includes(parent.token));
+    const reused=await (await worker.fetch(request('/api/shares','POST',body),env)).json() as any;assert.equal(reused.token,child.token);
+    const expiry=now+86_400_000;assert.equal((await worker.fetch(request(`/api/shares/admin/${id}`,'PATCH',{revision:1,expiresAt:new Date(expiry).toISOString()},admin),env)).status,200);
+    assert.equal((await (await worker.fetch(request(`/api/shares/${child.token}`),env)).json() as any).expiresAt,new Date(expiry).toISOString());
+    assert.equal((await worker.fetch(request(`/api/shares/admin/${id}`,'DELETE',undefined,admin),env)).status,204);
+    for(const suffix of ['','/model.3mf'])assert.equal((await worker.fetch(request(`/api/shares/${child.token}${suffix}`),env)).status,404);
+    assert.equal((await worker.fetch(request('/api/shares','POST',body),env)).status,404);
+    await cleanupExpiredShares(env,now);assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM shares').get() as any).n,0);
   }finally{env.SHARES_DB.db.close();}
 });

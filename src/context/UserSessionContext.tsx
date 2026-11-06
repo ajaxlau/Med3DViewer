@@ -56,7 +56,7 @@ export function UserSessionProvider({children}:{children:ReactNode}) {
   return <Context.Provider value={{user,checking,busy,enabled,loginOpen,error,login,logout,
     openLogin:()=>{setError('');setLoginOpen(true);},closeLogin:()=>{if(!mutating.current){setLoginOpen(false);setError('');}},
     hasPermission:permission=>!!user&&Date.parse(user.expiresAt)>Date.now()&&user.permissions.includes(permission),
-    requireLogin:()=>{setUser(null);setError('Your session expired or access changed. Log in again.');setLoginOpen(true);}
+    requireLogin:()=>{setUser(null);setError('Please log in again.');setLoginOpen(true);}
   }}>{children}</Context.Provider>;
 }
 export function useUserSession():UserSessionState {

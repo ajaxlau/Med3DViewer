@@ -1,6 +1,6 @@
 import { createUserSession, readUserSession, requireUserPermission, revokeUserSession, publicUserSession, userSessionCookie, SessionError, type SharingIdentity } from './userSessions';
 import { validateSharedWorkspace } from '../src/lib/planningData';
-import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
+import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, modelShareKey, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
 import { cleanupExpiredShares, databaseScopeMatches } from './cleanup';
 
 // Local interfaces keep the browser's dependency graph free of Workers SDKs.
@@ -208,16 +208,18 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   if (body.includeWorkspace !== undefined && typeof body.includeWorkspace !== 'boolean') throw new ShareError(400,'REQUEST_INVALID','Choose model-only or workspace sharing.');
   if(history && includeWorkspace) owner=`sharer:${(await authorizeWorkspaceSharing(request,env,now,body.sharingUsername,body.sharingPassword)).id}`;
   else if(!history) await authenticate(request,env);
-  else {owner='public-model';await limitedAttempts(request,env,now,'public-create',5,DAY);}
+  else {owner='public-model';await limitedAttempts(request,env,now,'model-link',120);}
   if (!includeWorkspace && !history) throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0003 for model-only public sharing.');
-  const label = workspaceLabel(body.label ?? '');
+  const label = workspaceLabel(includeWorkspace?body.label??'':'');
   if(history && includeWorkspace && !label)throw new ShareError(400,'LABEL_INVALID','Enter a workspace name.');
   const editable = await editableSchemaReady(env);
   if((body.sourceUrl!==undefined)===(body.sourceShareToken!==undefined))throw new ShareError(400,'SOURCE_INVALID','Provide one model source.');
   let sourceReference=body.sourceUrl;
+  let parentHash:string|undefined,parentExpiry:number|undefined;
   if(body.sourceShareToken!==undefined) {
-    if(!includeWorkspace||typeof body.sourceShareToken!=='string'||!TOKEN.test(body.sourceShareToken))throw new ShareError(400,'SOURCE_INVALID','A valid existing model link is required.');
+    if(typeof body.sourceShareToken!=='string'||!TOKEN.test(body.sourceShareToken))throw new ShareError(400,'SOURCE_INVALID','A valid existing model link is required.');
     const original=await loadRecord(body.sourceShareToken,env,now);
+    if(!includeWorkspace){parentHash=/^model-from:([a-f0-9]{64}):[a-f0-9]{64}$/.exec(original.owner_ref)?.[1]||original.token_hash;parentExpiry=original.expires_at;}
     if(body.modelIdentity!==original.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity does not match this source.');
     try{sourceReference=await decryptSource(original.source_ciphertext,original.token_hash,env);}
     catch{throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','The existing model source could not be recovered.');}
@@ -234,10 +236,17 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   }
   const snapshot = JSON.stringify(workspace);
   if (encoder.encode(snapshot).length > MAX_WORKSPACE_BYTES) throw new ShareError(413, 'WORKSPACE_TOO_LARGE', 'The workspace metadata is too large to share.');
+  if(history&&!includeWorkspace) {
+    const key=await modelShareKey(source.href,body.modelIdentity,snapshot,env.SHARES_ENCRYPTION_KEY!);
+    owner=parentHash?`model-from:${parentHash}:${key}`:`public-model:${key}`;
+    const existing=await reusableModelLink(request,owner,env,now);
+    if(existing)return existing;
+    await limitedAttempts(request,env,now,'public-create',5,DAY);
+  }
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
   const hash = await hashToken(token);
   const ciphertext = await encryptSource(source.href, hash, env);
-  let expires = now + SHARE_LIFETIME_MS;
+  let expires = Math.min(now + SHARE_LIFETIME_MS,parentExpiry??Infinity);
   if (body.expiresAt !== undefined) {
     if(!includeWorkspace)throw new ShareError(400,'REQUEST_INVALID','Custom expiry is available for workspace sharing.');
     expires = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
@@ -251,16 +260,33 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const results = await env.SHARES_DB!.batch([
     env.SHARES_DB!.prepare(`INSERT INTO shares(token_hash,source_ciphertext,model_extension,model_identity,workspace_json,owner_ref,created_at,expires_at)
       SELECT ?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM shares) < ?
-      AND COALESCE((SELECT count FROM share_rate_limits WHERE bucket=?),0) < ?`)
-      .bind(hash,ciphertext,ext,body.modelIdentity,snapshot,owner,now,expires,limit,daily,dailyLimit),
+      AND COALESCE((SELECT count FROM share_rate_limits WHERE bucket=?),0) < ?
+      ${history&&!includeWorkspace?'AND NOT EXISTS(SELECT 1 FROM shares WHERE owner_ref=? AND expires_at>? AND revoked_at IS NULL)':''}`)
+      .bind(hash,ciphertext,ext,body.modelIdentity,snapshot,owner,now,expires,limit,daily,dailyLimit,...(history&&!includeWorkspace?[owner,now]:[])),
     env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at)
       SELECT ?,1,? WHERE EXISTS(SELECT 1 FROM shares WHERE token_hash=?)
       ON CONFLICT(bucket) DO UPDATE SET count=count+1`).bind(daily,now + 2 * DAY,hash),
     ...(editable ? [env.SHARES_DB!.prepare('UPDATE shares SET label=?,updated_at=?,view_token_ciphertext=? WHERE token_hash=?').bind(label,now,viewCiphertext,hash)] : []),
     ...(history ? [env.SHARES_DB!.prepare('UPDATE shares SET include_workspace=?,editing_enabled=? WHERE token_hash=?').bind(includeWorkspace?1:0,includeWorkspace?1:0,hash)] : []),
   ]);
+  if(!results[0]?.meta?.changes&&history&&!includeWorkspace){const existing=await reusableModelLink(request,owner,env,now);if(existing)return existing;}
   if (!results[0]?.meta?.changes) throw new ShareError(429, 'SHARE_LIMIT', 'The share creation quota is full. Try later or contact the platform owner.');
   return json({ url: new URL(`/s/${token}`, request.url).href, token, expiresAt: new Date(expires).toISOString(),revision:1,editingAvailable:editable }, 201);
+}
+async function reusableModelLink(request:Request,owner:string,env:ShareEnvironment,now:number):Promise<Response|null> {
+  const row=await env.SHARES_DB!.prepare('SELECT token_hash,view_token_ciphertext FROM shares WHERE owner_ref=? AND expires_at>? AND revoked_at IS NULL AND view_token_ciphertext IS NOT NULL ORDER BY created_at DESC LIMIT 1').bind(owner,now).first<{token_hash:string;view_token_ciphertext:string}>();
+  if(!row)return null;
+  let token:string;
+  try{token=await decryptSource(row.view_token_ciphertext,`view-token:${row.token_hash}`,env);}
+  catch{throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','The model share could not be recovered.');}
+  if(!TOKEN.test(token)||await hashToken(token)!==row.token_hash)throw new ShareError(503,'SHARING_UNAVAILABLE','The model share is unavailable.');
+  const record=await loadRecord(token,env,now);
+  return json({url:new URL(`/s/${token}`,request.url).href,token,expiresAt:new Date(record.expires_at).toISOString(),revision:record.revision??1,editingAvailable:true});
+}
+function validShareRecord(result:ShareRecord|null):result is ShareRecord {
+  return !!result&&Number.isSafeInteger(result.created_at)&&result.created_at>=0&&Number.isSafeInteger(result.expires_at)
+    &&result.expires_at>result.created_at&&result.expires_at<=result.created_at+SHARE_LIFETIME_MS
+    &&['stl','3mf','glb'].includes(result.model_extension)&&TOKEN.test(result.model_identity);
 }
 async function loadRecord(token: string, env: ShareEnvironment, now: number): Promise<ShareRecord> {
   const hash = await hashToken(token);
@@ -268,10 +294,12 @@ async function loadRecord(token: string, env: ShareEnvironment, now: number): Pr
   const result = editable
     ? await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE (token_hash=? OR edit_token_hash=?) AND expires_at>? AND revoked_at IS NULL').bind(hash,hash,now).first<ShareRecord>()
     : await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL').bind(hash,now).first<ShareRecord>();
-  if (!result || !Number.isSafeInteger(result.created_at) || result.created_at < 0
-    || !Number.isSafeInteger(result.expires_at) || result.expires_at <= result.created_at || result.expires_at > result.created_at + SHARE_LIFETIME_MS
-    || !['stl','3mf','glb'].includes(result.model_extension) || !TOKEN.test(result.model_identity)) {
-    throw new ShareError(404, 'SHARE_UNAVAILABLE', 'This share is unavailable or has expired.');
+  if(!validShareRecord(result))throw new ShareError(404,'SHARE_UNAVAILABLE','This share is unavailable or has expired.');
+  const parentHash=/^model-from:([a-f0-9]{64}):[a-f0-9]{64}$/.exec(result.owner_ref)?.[1];
+  if(parentHash){
+    const parent=await env.SHARES_DB!.prepare('SELECT * FROM shares WHERE token_hash=? AND expires_at>? AND revoked_at IS NULL').bind(parentHash,now).first<ShareRecord>();
+    if(!validShareRecord(parent)||parent.owner_ref.startsWith('model-from:')||parent.model_identity!==result.model_identity||parent.model_extension!==result.model_extension)throw new ShareError(404,'SHARE_UNAVAILABLE','This share is unavailable or has expired.');
+    result.expires_at=Math.min(result.expires_at,parent.expires_at);
   }
   return {...result,role:result.token_hash===hash||result.auth_epoch!==undefined?'view':'edit'};
 }
