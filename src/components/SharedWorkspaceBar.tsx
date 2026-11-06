@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, RotateCw, Pin, PinOff } from 'lucide-react';
+import { RotateCw } from 'lucide-react';
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS } from './SectionControls';
 import { shouldIgnoreHover } from '../lib/utils';
 import { listWorkspaceHistory, loadWorkspaceVersion, saveProtectedWorkspace, type WorkspaceHistoryItem } from '../lib/sharedWorkspace';
 import type { ViewerManager } from '../lib/ViewerManager';
@@ -90,7 +91,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
     clearCollapse(); collapseTimer.current = setTimeout(() => {
       if (container.current?.contains(document.activeElement) || request.current) return;
       setExpanded(false);
-    },350);
+    },SECTION_COLLAPSE_DELAY_MS);
   }} className="rounded-lg border border-zinc-200 bg-zinc-50/70 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100">
     <div className="flex items-center pr-3">
       <button type="button" aria-label={`Workspace revisions: ${session.workspaceName || 'Workspace'}, revision ${session.historyEnabled ? viewing : session.revision}`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => {
@@ -98,13 +99,10 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
       }} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 transition-colors hover:bg-zinc-100/70 dark:text-zinc-300 dark:hover:bg-zinc-800/60" title="Workspace revisions">
         <span className="min-w-0 flex-1 truncate">Workspace Revision</span>
         <span className="shrink-0 text-[10px]">v{session.historyEnabled ? viewing : session.revision}</span>
-        {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
-      <button type="button" aria-label="Pin workspace revisions" aria-pressed={pinned} title={pinned ? 'Unpin workspace revisions' : 'Keep workspace revisions open'} onClick={() => {
+      <SectionControls label="workspace revisions" expanded={expanded} pinned={pinned} onPin={() => {
         clearCollapse(); setPinned(!pinned); if (!pinned) setExpanded(true);
-      }} className={`flex min-h-8 min-w-8 items-center justify-center rounded transition-colors ${pinned ? 'bg-blue-100/80 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}`}>
-        {pinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-      </button>
+      }} onToggle={() => { clearCollapse(); setExpanded(!expanded); }} />
     </div>
     {expanded && <div id={detailsId} className="space-y-3 px-4 pb-3">
       {session.workspaceName && <p className="truncate text-xs font-medium" title={session.workspaceName}>{session.workspaceName}</p>}

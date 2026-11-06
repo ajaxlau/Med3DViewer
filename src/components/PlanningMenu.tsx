@@ -1,5 +1,6 @@
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS } from './SectionControls';
 import { useViewer } from '../context/ViewerContext';
-import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff, Layers } from 'lucide-react';
+import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Layers } from 'lucide-react';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
@@ -67,7 +68,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
         return;
       }
       setIsToolsExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   // Project IO hover handlers
@@ -91,7 +92,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
         return;
       }
       setIsProjectIoExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   // Object List hover handlers
@@ -115,7 +116,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
         return;
       }
       setIsObjectListExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   useEffect(() => {
@@ -209,29 +210,13 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
               )}
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              {/* Pin button */}
-              <button
-                onClick={() => setIsToolsPinned(!isToolsPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isToolsPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isToolsPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isToolsPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              {/* Expand / Retract Chevron */}
-              <button
-                onClick={() => setIsToolsExpanded(!isToolsExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isToolsExpanded ? "Minimize analytics section" : "Expand analytics section"}
-              >
-                {isToolsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="analytics" expanded={isToolsExpanded} pinned={isToolsPinned} onPin={() => {
+                if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+                setIsToolsPinned(!isToolsPinned); if (!isToolsPinned) setIsToolsExpanded(true);
+              }} onToggle={() => {
+                if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+                setIsToolsExpanded(!isToolsExpanded);
+              }} />
           </div>
 
           {/* Collapsed Compact State / Quick Active Bar */}
@@ -629,27 +614,13 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
               </span>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsProjectIoPinned(!isProjectIoPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isProjectIoPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isProjectIoPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isProjectIoPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              <button
-                onClick={() => setIsProjectIoExpanded(!isProjectIoExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isProjectIoExpanded ? "Minimize project IO section" : "Expand project IO section"}
-              >
-                {isProjectIoExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="project IO" expanded={isProjectIoExpanded} pinned={isProjectIoPinned} onPin={() => {
+                if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+                setIsProjectIoPinned(!isProjectIoPinned); if (!isProjectIoPinned) setIsProjectIoExpanded(true);
+              }} onToggle={() => {
+                if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+                setIsProjectIoExpanded(!isProjectIoExpanded);
+              }} />
           </div>
 
           {projectIoError && <p role="alert" className="px-3 py-2 text-xs text-red-700 dark:text-red-300">{projectIoError}</p>}
@@ -794,27 +765,13 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
               </span>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsObjectListPinned(!isObjectListPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isObjectListPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isObjectListPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isObjectListPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              <button
-                onClick={() => setIsObjectListExpanded(!isObjectListExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isObjectListExpanded ? "Minimize object list section" : "Expand object list section"}
-              >
-                {isObjectListExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="object list" expanded={isObjectListExpanded} pinned={isObjectListPinned} onPin={() => {
+                if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
+                setIsObjectListPinned(!isObjectListPinned); if (!isObjectListPinned) setIsObjectListExpanded(true);
+              }} onToggle={() => {
+                if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
+                setIsObjectListExpanded(!isObjectListExpanded);
+              }} />
           </div>
 
           {/* Expanded Object List Grid */}
