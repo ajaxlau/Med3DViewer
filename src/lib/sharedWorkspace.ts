@@ -6,6 +6,11 @@ const TOKEN = /^[a-f0-9]{64}$/;
 const IDENTITY = /^[a-f0-9]{64}$/;
 const METADATA_LIMIT = 270 * 1024;
 const shareDownloadErrors: Record<string, string> = {
+  SOURCE_INVALID: 'Use a valid Dropbox model link or an active model-sharing address.',
+  SOURCE_HOST_UNSUPPORTED: 'Workspace sharing currently supports Dropbox file-sharing links.',
+  FORMAT_UNSUPPORTED: 'Use a self-contained STL, 3MF or GLB model.',
+  WORKSPACE_TOO_LARGE: 'The workspace metadata exceeds the 256 KiB sharing limit.',
+  SHARE_LIMIT: 'The share creation limit was reached. Try later or contact the administrator.',
   SOURCE_REDIRECT_UNSUPPORTED: 'Dropbox returned an unsupported download redirect. Ask the platform owner to check Dropbox compatibility.',
   SOURCE_ACCESS_DENIED: 'Dropbox refused the server download. Check the file’s sharing permissions or try a new Dropbox link.',
   SOURCE_NOT_FOUND: 'Dropbox could not find the source file. Ask its owner to check the original link.',
@@ -26,6 +31,10 @@ const shareDownloadErrors: Record<string, string> = {
   UPGRADE_REQUIRED: 'Editing and management need the editable-workspace database migration. Contact the platform owner.',
   UNAUTHORIZED: 'The administrator password was not accepted.',
   EXPIRY_INVALID: 'Expiry must be in the future and no later than 180 days after creation.',
+  LOGIN_REQUIRED: 'Log in to share a workspace.',
+  PERMISSION_REQUIRED: 'Your account cannot perform this action.',
+  SESSION_LIMIT: 'Sign-in sessions are full or your access changed. Try again later.',
+  LABEL_INVALID: 'Enter a workspace name of at most 128 characters.',
   SHARE_PASSWORD_INVALID: 'The sharing username or password was not accepted.',
   EDIT_SESSION_INVALID: 'Your editing session expired or permissions changed. Unlock editing again.',
   PASSWORD_INVALID: 'Choose a sharing password of 12–128 characters.',
@@ -45,6 +54,7 @@ export interface SharedWorkspaceResponse {
   role: 'view' | 'edit';
   revision: number;
   viewUrl?: string;
+  workspaceName?: string;
   historyEnabled?: boolean;
   includeWorkspace?: boolean;
   editingEnabled?: boolean;
@@ -137,6 +147,7 @@ export function validateShareResponse(value: unknown, token: string, origin: str
     modelIdentity: data.modelIdentity!,
     modelUrl: protectedModelPath(token, data.modelUrl, origin),
     expiresAt: data.expiresAt, role, revision,
+    ...(typeof data.workspaceName==='string'&&data.workspaceName.length<=128?{workspaceName:data.workspaceName}:{}),
     ...(data.historyEnabled === true ? {historyEnabled:true,includeWorkspace:data.includeWorkspace===true,editingEnabled:data.editingEnabled===true,workspaceVersion:validVersion(data.workspaceVersion)} : {}),
     ...(data.viewUrl !== undefined ? {viewUrl:protectedWorkspaceUrl(data.viewUrl,origin)} : {}),
   };
@@ -182,23 +193,19 @@ export async function loadSharedModel(
   return { metadata, file: new File([modelBytes], `shared-model.${extension}`, { type: 'application/octet-stream' }) };
 }
 
-export async function createProtectedShare(input: { sourceUrl: string; workspace: unknown; modelIdentity: string; label?: string; includeWorkspace?: boolean; sharingUsername?: string }, sharingPassword: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
+export async function createProtectedShare(input: { sourceUrl?: string; sourceShareToken?: string; workspace: unknown; modelIdentity: string; label?: string; includeWorkspace?: boolean; sharingUsername?: string; expiresAt?: string }, sharingPassword: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
   if (!IDENTITY.test(input.modelIdentity)) throw new Error('Reload this model from its original URL before creating a protected share.');
-  if (input.includeWorkspace !== false && (!input.sharingUsername || sharingPassword.length < 12 || sharingPassword.length>128)) throw new Error('Enter your assigned sharing username and password.');
+  if (input.includeWorkspace !== false && input.sharingUsername !== undefined && (!input.sharingUsername || sharingPassword.length < 12 || sharingPassword.length>128)) throw new Error('Enter your assigned sharing username and password.');
   const workspace = validateSharedWorkspace(input.workspace);
   const response = await fetch('/api/shares', {
-    method: 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', signal,
+    method: 'POST', credentials: input.includeWorkspace===false?'omit':'same-origin', cache: 'no-store', redirect: 'error', signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceUrl: input.sourceUrl, workspace, modelIdentity: input.modelIdentity, ...(input.label !== undefined ? {label:input.label} : {}),...(input.includeWorkspace !== undefined?{includeWorkspace:input.includeWorkspace}:{}),...(input.includeWorkspace!==false?{sharingUsername:input.sharingUsername,sharingPassword}:{}) })
+    body: JSON.stringify({ ...(input.sourceShareToken?{sourceShareToken:input.sourceShareToken}:{sourceUrl:input.sourceUrl}), workspace, modelIdentity: input.modelIdentity, ...(input.label !== undefined ? {label:input.label} : {}),...(input.includeWorkspace !== undefined?{includeWorkspace:input.includeWorkspace}:{}),...(input.includeWorkspace!==false&&input.sharingUsername!==undefined?{sharingUsername:input.sharingUsername,sharingPassword}:{}),...(input.expiresAt!==undefined?{expiresAt:input.expiresAt}:{}) })
   });
   if (!response.ok) {
-    const errors: Record<number, string> = {
-      400: 'Use a self-contained Dropbox STL, 3MF or GLB model without local custom meshes.',
-      401: 'The sharing username or password was not accepted.', 403: 'Share creation is not permitted.',
-      413: 'The planning workspace is too large to share as metadata.', 429: 'The sharing limit was reached. Try again later.',
-      503: 'Protected sharing has not been configured for this environment.'
-    };
-    throw new Error(errors[response.status] || 'The protected link could not be created. Try again later.');
+    const error=await shareDownloadError(response,signal);
+    if(response.status===401)error.name='LoginRequiredError';
+    throw error;
   }
   const data = await response.json();
   if (!TOKEN.test(data.token) || typeof data.expiresAt !== 'string' || !Number.isFinite(Date.parse(data.expiresAt)) || Date.parse(data.expiresAt) <= Date.now()) throw new Error('The share service returned an invalid response.');
@@ -300,4 +307,12 @@ export async function loadWorkspaceVersion(token:string,version:number,identity:
   const data=await historyRequest(token,`revisions/${version}`,signal);
   if(data.version!==version||data.modelIdentity!==identity)throw new Error('This version belongs to a different model.');
   return {workspace:validateSharedWorkspace(data.workspace),revision:validVersion(data.revision),currentVersion:validVersion(data.currentVersion)};
+}
+
+export async function shareWorkspaceWithSession(token:string,signal:AbortSignal):Promise<string> {
+  if(!TOKEN.test(token))throw new Error('Invalid workspace address.');
+  const response=await fetch(`/api/shares/${token}/share-link`,{method:'POST',credentials:'same-origin',cache:'no-store',redirect:'error',signal,headers:{'Content-Type':'application/json'},body:'{}'});
+  if(!response.ok){const error=await shareDownloadError(response,signal);if(response.status===401)error.name='LoginRequiredError';throw error;}
+  const data=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,8192,signal)));
+  return protectedWorkspaceUrl(data.url);
 }

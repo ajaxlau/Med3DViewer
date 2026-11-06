@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { UserSessionProvider } from './context/UserSessionContext';
 import { ViewerProvider, useViewer } from './context/ViewerContext';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -82,7 +83,7 @@ function MainLayout() {
             viewerManager.sharedWorkspaceRole = metadata.role;
             viewerManager.sharedWorkspaceIncludesPlanning = metadata.includeWorkspace !== false;
             viewerManager.sharedWorkspaceViewUrl = metadata.viewUrl ?? (metadata.role==='view'?`${window.location.origin}/s/${token}`:null);
-            setSharedSession({token,role:metadata.role,revision:metadata.revision,historyEnabled:metadata.historyEnabled,includeWorkspace:metadata.includeWorkspace,editingEnabled:metadata.editingEnabled,workspaceVersion:metadata.workspaceVersion,modelIdentity:metadata.modelIdentity,requestId:importId!,expiresAt:metadata.expiresAt});
+            setSharedSession({token,role:metadata.role,revision:metadata.revision,workspaceName:metadata.workspaceName,historyEnabled:metadata.historyEnabled,includeWorkspace:metadata.includeWorkspace,editingEnabled:metadata.editingEnabled,workspaceVersion:metadata.workspaceVersion,modelIdentity:metadata.modelIdentity,requestId:importId!,expiresAt:metadata.expiresAt});
             viewerManager.config.onStatusChange('Shared workspace loaded.', false, file.name, metadata.modelUrl);
             setSharedNotice(null);
           } catch (error) {
@@ -217,8 +218,10 @@ function MainLayout() {
 export default function App() {
   if(/^\/admin\/shares\/?$/.test(window.location.pathname))return <Suspense fallback={<p className="p-6">Opening workspace manager…</p>}><ShareAdminPage /></Suspense>;
   return (
-    <ViewerProvider>
-      <MainLayout />
-    </ViewerProvider>
+    <UserSessionProvider>
+      <ViewerProvider>
+        <MainLayout />
+      </ViewerProvider>
+    </UserSessionProvider>
   );
 }

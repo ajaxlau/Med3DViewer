@@ -1,5 +1,6 @@
 import { Link, Share2, Ruler, Moon, Sun, PenTool, Camera, RotateCcw, Info } from 'lucide-react';
 import { useViewer } from '../context/ViewerContext';
+import { UserLogin } from './UserLogin';
 import { Tooltip } from './Tooltip';
 
 // Custom icon: 3 parallel menu lines with an overlaid eye, middle line broken around pupil
@@ -41,8 +42,8 @@ export function Header({
   } = useViewer();
 
   return (
-    <header className="h-[64px] bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6 z-30 relative shrink-0 md:h-[64px] h-auto py-2 md:py-0 flex-col md:flex-row gap-3 md:gap-0">
-      <div className="flex items-center gap-3 font-bold text-[14px] text-zinc-800 dark:text-zinc-100 font-display tracking-tight text-base md:text-lg">
+    <header className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900 z-30 relative shrink-0 md:flex md:h-16 md:justify-between md:px-6 md:py-0">
+      <div className="flex min-w-0 items-center gap-3 font-bold text-[14px] text-zinc-800 dark:text-zinc-100 font-display tracking-tight text-base md:text-lg">
         <img
           src="/3DPO_Small_Logo.png"
           alt="3DPO Logo"
@@ -53,7 +54,7 @@ export function Header({
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto justify-start md:justify-end text-zinc-500 dark:text-zinc-400">
+      <div className="col-span-2 row-start-2 flex items-center gap-1.5 flex-wrap w-full md:w-auto justify-start md:justify-end text-zinc-500 dark:text-zinc-400">
         <Tooltip content="Load from URL">
           <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('url')}>
             <Link size={18} />
@@ -67,7 +68,7 @@ export function Header({
         </Tooltip>
 
         <Tooltip content="Share Model">
-          <button className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('share')}>
+          <button aria-label="Share model" className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={() => setActiveModal('share')}>
             <Share2 size={18} />
           </button>
         </Tooltip>
@@ -123,6 +124,7 @@ export function Header({
           </button>
         </Tooltip>
       </div>
+      <div className="col-start-2 row-start-1 text-zinc-600 dark:text-zinc-300"><UserLogin /></div>
     </header>
   );
 }

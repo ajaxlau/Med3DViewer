@@ -34,3 +34,11 @@ At that initial stage, protected sharing was limited to Dropbox STL with procedu
 - Local Chromium at 390×844 against a real local Worker/D1 passed admin login, sharing-user creation/password rotation/batch disable, public recipient saves without a password, no auto-save, version selection, stale conflicts, exact expiry preservation, expiry maximum, batch link revocation, scrolling and no persistent credentials. The recipient component used a synthetic model-state harness; this did not validate real 3MF parsing, physical device GPU behavior or Slicer interoperability. Service workers were blocked in this isolated browser harness.
 - The Vite/PWA artifact builds with a 256 open-file limit. No geometry copies or additional package dependencies were introduced.
 - Live Workers requests from the automation runner may still return Cloudflare error 1010; local checks do not establish remote acceptance. Test D1 migration 0003 and owner acceptance are required before beta/main promotion.
+
+
+## Front-page login and compact workspace controls (6 November 2026)
+
+- SQLite-backed checks cover Secure/HttpOnly/SameSite cookies, server-side logout revocation, cookie tampering, origin/environment isolation, account disable/password rotation, eight-hour expiry, permission profiles and named workspace expiry validation. No schema-4 migration is introduced.
+- Actual local Chromium/Worker/D1 passed front-page login, page-reload session persistence, password-free guest model sharing, mobile workspace-name/expiry inputs, and cookie visibility checks. The guest recipient saved measurement definitions and mesh show/hide/opacity after the publisher logged out, then restored an older revision and encountered a stale-save conflict from another tab.
+- Recipient controls start collapsed, show the revision number even when the name truncates, and fetch no revision list until expanded. The mobile test verifies scrolling and no horizontal overflow. Sessions/credentials are absent from application localStorage/sessionStorage.
+- The model geometry is a synthetic state fixture; real 3MF parsing and physical iOS/Android GPU/Slicer acceptance remain separate checks. Browser service workers were blocked for the isolated harness. The normal API navigation denylist remains covered independently.

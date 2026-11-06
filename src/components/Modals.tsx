@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useUserSession } from '../context/UserSessionContext';
+import { defaultWorkspaceName, localDateTime, workspaceExpiry, WORKSPACE_MAX_AGE_MS } from '../lib/workspaceSharing';
 import { useViewer } from '../context/ViewerContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { loadZip } from '../lib/loadZip';
@@ -8,11 +10,14 @@ import { GpuStatusModal } from './GpuStatusModal';
 const InfoModal = lazy(() => import('./InfoModal').then(module => ({ default: module.InfoModal })));
 import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
-import { authorizePublicWorkspaceShare, createProtectedShare } from '../lib/sharedWorkspace';
+import { shareWorkspaceWithSession, createProtectedShare } from '../lib/sharedWorkspace';
 
 
 export function Modals() {
   const { activeModal, setActiveModal, filename, loadedUrl, isEmpty, resetWorkspace } = useViewer();
+
+  const auth=useUserSession();
+  const canShareWorkspace=auth.hasPermission('workspace:share');
 
   // URL Modal state
   const [urlInput, setUrlInput] = useState('');
@@ -21,12 +26,10 @@ export function Modals() {
   const [shareVal, setShareVal] = useState('');
   const [isSandbox, setIsSandbox] = useState(false);
   const [protectedEnabled, setProtectedEnabled] = useState(false);
-  const [sharingPassword, setSharingPassword] = useState('');
   const [creatingShare, setCreatingShare] = useState(false);
   const [protectedError, setProtectedError] = useState('');
   const [protectedExpiry, setProtectedExpiry] = useState<string | null>(null);
   const [isProtectedLink, setIsProtectedLink] = useState(false);
-  const [sharingUsername,setSharingUsername]=useState('');
 
 
   const [includeWorkspace,setIncludeWorkspace]=useState(false);
@@ -36,12 +39,13 @@ export function Modals() {
 
 
   const [workspaceLabel,setWorkspaceLabel]=useState('');
+  const [workspaceExpiresAt,setWorkspaceExpiresAt]=useState(()=>localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS));
+  const existingModelOnly=!!existingToken&&window._viewerManagerInstance?.sharedWorkspaceIncludesPlanning===false;
   const shareAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (activeModal !== 'share') {
       shareAbortRef.current?.abort();
-      setSharingPassword('');setSharingUsername('');
       
       setCreatingShare(false);
       return;
@@ -60,6 +64,10 @@ export function Modals() {
     return () => { shareAbortRef.current?.abort(); };
   }, [loadedUrl]);
 
+  useEffect(()=>{
+    if(!canShareWorkspace&&includeWorkspace&&!existingToken){shareAbortRef.current?.abort();setCreatingShare(false);setIncludeWorkspace(false);setShareVal('');setIsProtectedLink(false);}
+  },[canShareWorkspace]);
+
   const handleCreateProtectedShare = async () => {
     const manager = window._viewerManagerInstance;
     if (!manager || !loadedUrl || creatingShare) return;
@@ -69,25 +77,26 @@ export function Modals() {
     setCreatingShare(true);
     try {
       const url = new URL(loadedUrl, window.location.origin);
-      if (url.origin === window.location.origin && url.pathname.startsWith('/api/shares/')) {
+      if (url.origin === window.location.origin && url.pathname.startsWith('/api/shares/') && !(existingModelOnly&&includeWorkspace)) {
         throw new Error('Open the public workspace and use Save workspace to save changes.');
       }
-      if (!/^https:$/.test(url.protocol) || !/\.(?:stl|3mf|glb)$/i.test(url.pathname)) {
+      if (!(existingModelOnly&&includeWorkspace) && (!/^https:$/.test(url.protocol) || !/\.(?:stl|3mf|glb)$/i.test(url.pathname))) {
         throw new Error('Protected sharing supports self-contained Dropbox STL, 3MF and GLB files.');
       }
+      if(includeWorkspace&&(!canShareWorkspace||!workspaceLabel.trim()))throw new Error('Log in and enter a workspace name before sharing.');
       if(manager.loadedModelShareable===false)throw new Error('This model has external or unsupported resources. Export a self-contained 3MF or GLB before protected sharing.');
       const result = await createProtectedShare({
-        sourceUrl: loadedUrl,
+        ...(existingModelOnly&&includeWorkspace?{sourceShareToken:existingToken!}:{sourceUrl:loadedUrl}),
         workspace: manager.exportShareWorkspace(),
-        modelIdentity: manager.loadedModelIdentity || '',label:workspaceLabel,includeWorkspace,sharingUsername:includeWorkspace?sharingUsername:undefined,
-      }, sharingPassword, controller.signal);
+        modelIdentity: manager.loadedModelIdentity || '',label:includeWorkspace?workspaceLabel.trim():undefined,includeWorkspace,...(includeWorkspace?{expiresAt:workspaceExpiry(workspaceExpiresAt)}:{}),
+      }, '', controller.signal);
       if (controller.signal.aborted) return;
       setShareVal(result.url);
       setIsProtectedLink(true);
       setProtectedExpiry(result.expiresAt);
       
-      setSharingPassword('');setSharingUsername('');
     } catch (error) {
+      if(!controller.signal.aborted&&error instanceof Error&&error.name==='LoginRequiredError')auth.requireLogin();
       if (!controller.signal.aborted) setProtectedError(error instanceof Error ? error.message : 'The protected share could not be created.');
     } finally {
       if (!controller.signal.aborted) setCreatingShare(false);
@@ -111,7 +120,7 @@ export function Modals() {
       let baseUrl = window.location.href.split('#')[0].split('?')[0];
       if (window.location.pathname.startsWith('/s/')) baseUrl = `${window.location.origin}/`;
       setProtectedError(''); setProtectedExpiry(null); setIsProtectedLink(false);  setCreatingShare(false);
-      setIncludeWorkspace(false);setWorkspaceLabel('');setExistingToken(null);setShareVal('');
+      setIncludeWorkspace(false);setWorkspaceLabel(defaultWorkspaceName(filename));setWorkspaceExpiresAt(localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS));setExistingToken(null);setShareVal('');
       const isSandboxUrl = baseUrl.startsWith('blob:') || baseUrl.includes('.webcomponent.local') || window.location.hostname === 'localhost' || window.location.hostname.includes('.run.app');
       setIsSandbox(isSandboxUrl);
       
@@ -348,7 +357,7 @@ export function Modals() {
 
   return (
     <div className="fixed inset-0 bg-zinc-900/60 z-[1000] flex items-center justify-center fade-in p-4">
-      <div className="bg-white dark:bg-zinc-900 p-8 rounded-sm shadow-xl outline-none border border-zinc-200 dark:border-zinc-800" 
+      <div className="max-h-[90dvh] overflow-y-auto bg-white dark:bg-zinc-900 p-5 sm:p-8 rounded-sm shadow-xl outline-none border border-zinc-200 dark:border-zinc-800" 
            style={{ width: activeModal === 'snapshot' ? '750px' : '450px', maxWidth: '100%' }}>
         
         {/* -- RESET WORKSPACE CONFIRMATION MODAL -- */}
@@ -458,27 +467,26 @@ export function Modals() {
                 </>
             )}
             {protectedExpiry && <p className="text-xs mb-3 text-zinc-600 dark:text-zinc-300">Expires {new Date(protectedExpiry).toLocaleString()}. The source host must remain available. Downloaded copies cannot be recalled.</p>}
-            {protectedEnabled && loadedUrl && !isProtectedLink && (
+            {protectedEnabled && loadedUrl && (!existingToken||(existingModelOnly&&canShareWorkspace)) && (
               <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4 mt-4 space-y-3">
-                <p className="text-xs">Share a public, source-concealing link for a self-contained Dropbox STL, 3MF or GLB. Model files stay at Dropbox. Links expire within 180 days.</p>
-                <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={includeWorkspace} disabled={!historyEnabled||creatingShare} onChange={event=>setIncludeWorkspace(event.target.checked)}/>Include analytics, object/mesh state and saved revision history</label>
-                {!historyEnabled&&<p className="text-xs">Apply database migration 0003 to enable this sharing flow.</p>}
-                {includeWorkspace&&<>
-                  <label className="block text-xs">Workspace label (optional)<input value={workspaceLabel} maxLength={128} onChange={event=>setWorkspaceLabel(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3 text-sm"/></label>
-                  <label className="block text-xs">Sharing username<input aria-label="Sharing username" autoComplete="off" maxLength={64} value={sharingUsername} onChange={event=>setSharingUsername(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3 text-sm"/></label>
-                  <label className="block text-xs">Assigned sharing password<input aria-label="Assigned sharing password" type="password" autoComplete="off" maxLength={128} value={sharingPassword} onChange={event=>setSharingPassword(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3 text-sm"/></label>
-                  <p className="text-xs">Use credentials assigned by the administrator. Only the sharer signs in. Recipients can view revisions and save changes without a password when editing is enabled.</p>
+                <p className="text-xs">Public model links conceal the Dropbox source. Workspace links also include analytics, mesh state and revision history.</p>
+                {canShareWorkspace?<label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={includeWorkspace} disabled={!historyEnabled||creatingShare} onChange={event=>{setIncludeWorkspace(event.target.checked);setShareVal(!event.target.checked&&existingModelOnly?`${window.location.origin}/s/${existingToken}`:'');setIsProtectedLink(!event.target.checked&&existingModelOnly);setProtectedExpiry(!event.target.checked&&existingModelOnly?window._viewerManagerInstance?.sharedWorkspaceExpiresAt||null:null);}}/>Share workspace</label>:<p className="text-xs"><button className="min-h-11 text-blue-600 underline" onClick={auth.openLogin}>Log in</button> to share a workspace. Public model sharing remains available.</p>}
+                {!historyEnabled&&<p className="text-xs">Workspace sharing is unavailable until database setup is complete.</p>}
+                {includeWorkspace&&canShareWorkspace&&<>
+                  <label className="block text-sm">Workspace name<input aria-label="Workspace name" required value={workspaceLabel} maxLength={128} onChange={event=>setWorkspaceLabel(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
+                  <label className="block text-sm">Expiry date and time<input aria-label="Workspace sharing expiry" type="datetime-local" required value={workspaceExpiresAt} min={localDateTime(Date.now()+60_000)} max={localDateTime(Date.now()+WORKSPACE_MAX_AGE_MS)} onChange={event=>setWorkspaceExpiresAt(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
+                  <p className="text-xs">Up to 180 days from creation. Recipients need no login to view revisions or save analytics and show/hide/opacity changes when editing is enabled.</p>
                 </>}
-                {!includeWorkspace&&<p className="text-xs">Model only: no analytics, mesh visibility changes or revision history will be published. No password is required.</p>}
-                <button disabled={creatingShare||!historyEnabled||(includeWorkspace&&(!sharingUsername||sharingPassword.length<12))} onClick={handleCreateProtectedShare} className="min-h-11 rounded bg-blue-600 px-4 text-xs font-semibold text-white disabled:opacity-50">{creatingShare?'Creating…':includeWorkspace?'Create public workspace link':'Create public model link'}</button>
+                {!includeWorkspace&&<p className="text-xs">Model only: analytics and revision history are excluded.</p>}
+                {(!existingToken||includeWorkspace)&&<button disabled={creatingShare||!historyEnabled||(includeWorkspace&&(!canShareWorkspace||!workspaceLabel.trim()||!workspaceExpiresAt))} onClick={handleCreateProtectedShare} className="min-h-11 rounded bg-blue-600 px-4 text-xs font-semibold text-white disabled:opacity-50">{creatingShare?'Creating…':includeWorkspace?'Create workspace link':'Create public model link'}</button>}
               </div>
             )}
-            {isProtectedLink&&includeWorkspace&&!shareVal&&existingToken&&<form className="my-3 space-y-3" onSubmit={event=>{event.preventDefault();if(creatingShare)return;const controller=new AbortController();shareAbortRef.current=controller;setCreatingShare(true);setProtectedError('');void authorizePublicWorkspaceShare(existingToken,sharingUsername,sharingPassword,controller.signal).then(url=>{if(!controller.signal.aborted){setShareVal(url);setSharingPassword('');}}).catch(reason=>{if(!controller.signal.aborted)setProtectedError(reason instanceof Error?reason.message:'Sharing authorization failed.');}).finally(()=>{if(!controller.signal.aborted)setCreatingShare(false);});}}>
-              <label className="block text-sm">Sharing username<input aria-label="Sharing username" autoComplete="off" maxLength={64} value={sharingUsername} onChange={event=>setSharingUsername(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
-              <label className="block text-sm">Password to share this workspace<input aria-label="Password to share workspace" type="password" autoComplete="off" maxLength={256} value={sharingPassword} onChange={event=>setSharingPassword(event.target.value)} className="mt-1 block min-h-11 w-full rounded border bg-transparent px-3"/></label>
-              <p className="text-xs">Use your assigned sharing credentials. The administrator password is only for administration. Recipients do not sign in.</p>
-              <button disabled={creatingShare||!sharingUsername||sharingPassword.length<12} className="min-h-11 rounded bg-blue-600 px-4 text-sm text-white disabled:opacity-50">Authorize sharing</button>
-            </form>}
+            {isProtectedLink&&includeWorkspace&&!shareVal&&existingToken&&<div className="my-3 space-y-3">
+              {canShareWorkspace?<button disabled={creatingShare} className="min-h-11 rounded bg-blue-600 px-4 text-sm text-white disabled:opacity-50" onClick={()=>{
+                if(creatingShare)return;const controller=new AbortController();shareAbortRef.current=controller;setCreatingShare(true);setProtectedError('');
+                void shareWorkspaceWithSession(existingToken,controller.signal).then(url=>{if(!controller.signal.aborted)setShareVal(url);}).catch(reason=>{if(!controller.signal.aborted){if(reason instanceof Error&&reason.name==='LoginRequiredError')auth.requireLogin();setProtectedError(reason instanceof Error?reason.message:'Sharing failed.');}}).finally(()=>{if(!controller.signal.aborted)setCreatingShare(false);});
+              }}>Share workspace</button>:<button className="min-h-11 rounded bg-blue-600 px-4 text-sm text-white" onClick={auth.openLogin}>Log in to share this workspace</button>}
+            </div>}
             {!protectedEnabled&&loadedUrl&&!isProtectedLink&&<p className="text-sm">Public sharing is unavailable on this environment. The source address will not be shared.</p>}
             {protectedEnabled&&<a href="/admin/shares" target="_blank" rel="noopener noreferrer" className="my-2 inline-block min-h-11 content-center text-sm text-blue-600 underline">Manage protected workspaces</a>}
 

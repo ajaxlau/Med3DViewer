@@ -145,6 +145,14 @@ test('model-only sharing excludes sharing credentials and uses a concealed publi
   const result=await createProtectedShare({sourceUrl:'https://dl.dropboxusercontent.com/model.3mf',workspace,modelIdentity:'b'.repeat(64),includeWorkspace:false,sharingUsername:'must-not-send'},'must-not-send-this-password',new AbortController().signal);
   assert(!result.url.includes('dropbox'));assert(!result.url.includes('password'));
 });
+test('signed-in workspace creation sends a name and expiry with a concealed source reference and no password',async t=>{
+  t.mock.method(globalThis,'fetch',async(_path:string,init:RequestInit)=>{
+    const body=JSON.parse(String(init.body));assert.equal(init.credentials,'same-origin');assert.equal(body.sourceShareToken,'a'.repeat(64));assert.equal(body.sourceUrl,undefined);
+    assert.equal(body.label,'Named workspace');assert.equal(body.expiresAt,'2099-01-01T00:00:00.000Z');assert.equal(body.sharingPassword,undefined);assert.equal(body.sharingUsername,undefined);
+    return new Response(JSON.stringify({token,url:`${window.location.origin}/s/${token}`,expiresAt:'2099-01-01T00:00:00.000Z'}),{status:201});
+  });
+  await createProtectedShare({sourceShareToken:'a'.repeat(64),workspace,modelIdentity:'b'.repeat(64),includeWorkspace:true,label:'Named workspace',expiresAt:'2099-01-01T00:00:00.000Z'},'',new AbortController().signal);
+});
 
 test('superseded or cancelled model imports cannot receive an old snapshot', async () => {
   const signal = new AbortController().signal;

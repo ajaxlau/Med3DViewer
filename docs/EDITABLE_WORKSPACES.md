@@ -2,19 +2,21 @@
 
 Public addresses hide the original Dropbox URL. Self-contained STL, 3MF and GLB are supported. D1 stores encrypted source references and workspace metadata; model files stay at Dropbox. No model copies or geometry uploads are added.
 
+The front-page login refactor uses the existing schema-3 database and assigned users. No additional migration, binding or runtime secret is required. See [USER_LOGIN.md](USER_LOGIN.md).
+
 ## The sharing flow
 
 - **Checkbox off:** create a public model-only address without a password. Analytics, object revisions and mesh display changes are excluded. Anonymous creation is limited to five attempts per source IP per day, plus the existing global creation quotas.
-- **Include analytics, object/mesh state and saved revision history:** the **person sharing** enters their assigned sharing username and password. The administrator creates these credentials. The admin password is not accepted for publishing a workspace.
-- Recipients open the same `/s/<random-token>` address **without signing in**. If public editing is enabled, they enter a display name and click **Save workspace** to publish changes. Adjusting tools or objects does not save automatically.
-- The version selector loads a chosen saved version after confirming replacement of local unsaved changes. Loading an old version does not rewrite history; a subsequent explicit Save creates a new version. Concurrent changes cause a conflict rather than overwriting a newer revision.
-- Opening Share for an existing workspace prompts the sharer for their assigned credentials before the platform displays its QR/copy controls. Since viewing is public, someone who already has the address can still copy or forward it themselves. This password controls the platform's publishing action, not recipient access.
+- **Share workspace:** the sharer first uses **Log in** on the front page, then selects this option in Share and enters a workspace name and expiry. The administrator assigns the sharing account; the admin password is not accepted for publishing a workspace.
+- Recipients open the same `/s/<random-token>` address **without signing in**. If public editing is enabled, they enter a display name and click **Save Workspace** to publish changes. Adjusting tools or objects does not save automatically.
+- Expand the compact workspace row to access **Workspace Revision**. The selector loads a chosen saved version after confirming replacement of local unsaved changes. Loading an old version does not rewrite history; a subsequent explicit Save creates a new version. Concurrent changes cause a conflict rather than overwriting a newer revision.
+- Opening Share for an existing workspace uses the current login before displaying its QR/copy controls. Since viewing is public, someone who already has the address can still copy or forward it themselves. This password controls the platform's publishing action, not recipient access.
 
 Workspace JSON includes annotations, analytic definitions/transforms/groups, object state and per-mesh visibility/opacity. The source fingerprint and scene-instance paths/geometry counts are checked before restoring state. Geometry and source URLs are excluded. Older workspace JSON remains supported.
 
 ## One-time upgrade from your current schema 2
 
-Your existing test database already returned version **2**. Keep that database, its scope, bindings and runtime secrets.
+The existing test database has been upgraded to **3**. Do not rerun migrations for the login refactor. The following instructions apply only to databases still on schema **2**; preserve their records, scope, bindings and runtime secrets.
 
 1. Open Cloudflare → D1 → **med3dviewer-shares-test** (`5645e9dd-918f-4bbc-a0d6-9e1c315c27ca`) → Console. Execute this check separately:
 

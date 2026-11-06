@@ -10,6 +10,14 @@ An interactive, high-performance web-based 3D Medical Model Viewer, Virtual Surg
 
 ---
 
+## Workspace sharing and login
+
+On the sharing-enabled test deployment, use **Log in** with an account assigned in **Sharing users**. In **Share model**, select **Share workspace** and enter its name and expiry (up to 180 days). Public model-only sharing remains available without login.
+
+Workspace recipients need no login to update supported analytics or mesh visibility/opacity when editing is enabled. Expand the compact workspace row to choose a **Workspace Revision**, then explicitly click **Save Workspace** to publish changes. The original Dropbox source address is hidden; model files remain at Dropbox.
+
+---
+
 ## 🌟 Key Platform Features
 
 ### 1. 🧊 High-Performance 3D Medical Visualization

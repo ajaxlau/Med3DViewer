@@ -1,3 +1,4 @@
+import { createUserSession, readUserSession, requireUserPermission, revokeUserSession, publicUserSession, userSessionCookie, SessionError, type SharingIdentity } from './userSessions';
 import { validateSharedWorkspace } from '../src/lib/planningData';
 import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
 import { cleanupExpiredShares, databaseScopeMatches } from './cleanup';
@@ -202,16 +203,26 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const history = await historySchemaReady(env);
   let owner = `creator:${env.SHARES_ENVIRONMENT}`;
   const body = await readJson(request) as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'modelIdentity','label','includeWorkspace','sharingUsername','sharingPassword'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'sourceShareToken', 'modelIdentity','label','includeWorkspace','sharingUsername','sharingPassword','expiresAt'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
   const includeWorkspace = body.includeWorkspace !== false;
   if (body.includeWorkspace !== undefined && typeof body.includeWorkspace !== 'boolean') throw new ShareError(400,'REQUEST_INVALID','Choose model-only or workspace sharing.');
-  if(history && includeWorkspace) owner=`sharer:${await authenticateSharingUser(request,body.sharingUsername,body.sharingPassword,env,now)}`;
+  if(history && includeWorkspace) owner=`sharer:${(await authorizeWorkspaceSharing(request,env,now,body.sharingUsername,body.sharingPassword)).id}`;
   else if(!history) await authenticate(request,env);
   else {owner='public-model';await limitedAttempts(request,env,now,'public-create',5,DAY);}
   if (!includeWorkspace && !history) throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0003 for model-only public sharing.');
   const label = workspaceLabel(body.label ?? '');
+  if(history && includeWorkspace && !label)throw new ShareError(400,'LABEL_INVALID','Enter a workspace name.');
   const editable = await editableSchemaReady(env);
-  const source = validateSource(body.sourceUrl, env, new URL(request.url).origin, true);
+  if((body.sourceUrl!==undefined)===(body.sourceShareToken!==undefined))throw new ShareError(400,'SOURCE_INVALID','Provide one model source.');
+  let sourceReference=body.sourceUrl;
+  if(body.sourceShareToken!==undefined) {
+    if(!includeWorkspace||typeof body.sourceShareToken!=='string'||!TOKEN.test(body.sourceShareToken))throw new ShareError(400,'SOURCE_INVALID','A valid existing model link is required.');
+    const original=await loadRecord(body.sourceShareToken,env,now);
+    if(body.modelIdentity!==original.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity does not match this source.');
+    try{sourceReference=await decryptSource(original.source_ciphertext,original.token_hash,env);}
+    catch{throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','The existing model source could not be recovered.');}
+  }
+  const source = validateSource(sourceReference, env, new URL(request.url).origin, true);
   const ext = extension(source);
   if (typeof body.modelIdentity !== 'string' || !TOKEN.test(body.modelIdentity)) throw new ShareError(400, 'MODEL_IDENTITY_INVALID', 'A model SHA-256 fingerprint is required.');
   let workspace: unknown;
@@ -226,7 +237,12 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const token = hex(crypto.getRandomValues(new Uint8Array(32)));
   const hash = await hashToken(token);
   const ciphertext = await encryptSource(source.href, hash, env);
-  const expires = now + SHARE_LIFETIME_MS;
+  let expires = now + SHARE_LIFETIME_MS;
+  if (body.expiresAt !== undefined) {
+    if(!includeWorkspace)throw new ShareError(400,'REQUEST_INVALID','Custom expiry is available for workspace sharing.');
+    expires = typeof body.expiresAt === 'string' ? Date.parse(body.expiresAt) : NaN;
+    if(!Number.isSafeInteger(expires)||expires<=now||expires>now+SHARE_LIFETIME_MS)throw new ShareError(400,'EXPIRY_INVALID','Expiry must be in the future and within 180 days from creation.');
+  }
   const daily = `create:${Math.floor(now / DAY)}`;
   const limit = integerSetting(env.SHARES_MAX_RECORDS, 500, 5000);
   const dailyLimit = integerSetting(env.SHARES_DAILY_CREATE_LIMIT, 50, 1000);
@@ -378,11 +394,11 @@ function sharingUsername(value: unknown): string {
   if(typeof value!=='string'||!/^[a-z][a-z0-9._-]{2,63}$/.test(value))throw new ShareError(400,'USERNAME_INVALID','Use a username of 3–64 lowercase letters, digits, dots, hyphens or underscores, starting with a letter.');
   return value;
 }
-async function authenticateSharingUser(request: Request, name: unknown, password: unknown, env: ShareEnvironment, now: number): Promise<string> {
+async function authenticateSharingUser(request: Request, name: unknown, password: unknown, env: ShareEnvironment, now: number): Promise<SharingIdentity> {
   await limitedAttempts(request,env,now,'sharing-login',5);
   // Use a fixed response for unknown, disabled and incorrect credentials.
   const username=typeof name==='string'&&/^[a-z][a-z0-9._-]{2,63}$/.test(name)?name:'';
-  const user=username?await env.SHARES_DB!.prepare('SELECT id,password_salt,password_hash,active FROM share_users WHERE username=?').bind(username).first<{id:string;password_salt:string;password_hash:string;active:number}>():null;
+  const user=username?await env.SHARES_DB!.prepare('SELECT id,username,password_salt,password_hash,active,updated_at FROM share_users WHERE username=?').bind(username).first<{id:string;username:string;password_salt:string;password_hash:string;active:number;updated_at:number}>():null;
   if(user) {
     const bucket=`sharer-login:${user.id}:${Math.floor(now/3_600_000)}`;
     const result=await env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at) VALUES(?,1,?)
@@ -392,7 +408,14 @@ async function authenticateSharingUser(request: Request, name: unknown, password
   // Do the same KDF for unknown users, limiting username timing disclosure.
   const digest=await passwordDigest(validWorkspacePassword(password)?password:'invalid-password-placeholder',user?.password_salt||'invalid-user-salt',env.SHARES_ENCRYPTION_KEY!);
   if(!user||!user.active||!validWorkspacePassword(password)||!equalDigest(digest,user.password_hash))throw new ShareError(401,'SHARE_PASSWORD_INVALID','The sharing username or password was not accepted.');
-  return user.id;
+  return {id:user.id,username:user.username,version:user.updated_at};
+}
+async function authorizeWorkspaceSharing(request:Request,env:ShareEnvironment,now:number,username?:unknown,password?:unknown):Promise<SharingIdentity> {
+  const session=await readUserSession(request,env,now);
+  if(session){requireUserPermission(session,'workspace:share');return session;}
+  // Preserve the existing per-share credential API for already-open clients.
+  if(username!==undefined||password!==undefined)return authenticateSharingUser(request,username,password,env,now);
+  throw new SessionError(401,'LOGIN_REQUIRED','Log in to share a workspace.');
 }
 async function manageSharingUsers(request: Request, env: ShareEnvironment, now: number, id?: string): Promise<Response> {
   if(!id&&request.method==='GET') {
@@ -425,7 +448,7 @@ async function manageSharingUsers(request: Request, env: ShareEnvironment, now: 
 }
 async function authorizePublicShare(request: Request, record: ShareRecord, env: ShareEnvironment, now: number, knownToken: string): Promise<Response> {
   const body=await readJson(request) as any;requestFields(body,['username','password']);
-  await authenticateSharingUser(request,body.username,body.password,env,now);
+  await authorizeWorkspaceSharing(request,env,now,body.username,body.password);
   let token=knownToken;
   if(await hashToken(token)!==record.token_hash) {
     if(!record.view_token_ciphertext)throw new ShareError(404,'SHARE_UNAVAILABLE','This older public address could not be recovered.');
@@ -595,6 +618,28 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           const enabled = await environmentReady(env);
           return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),...(await historySchemaReady(env)?{historyEnabled:true}:{}),formats:['stl','3mf','glb']} : {enabled:false});
         }
+        if(['/api/shares/login','/api/shares/logout','/api/shares/session'].includes(url.pathname)) {
+          const sessionPath=url.pathname.endsWith('/session');
+          if(request.method!==(sessionPath?'GET':'POST'))throw new ShareError(405,'METHOD_NOT_ALLOWED','This authentication method is not supported.');
+          if(!await environmentReady(env)) {
+            if(sessionPath)return json({authenticated:false,enabled:false});
+            throw new ShareError(503,'SHARING_DISABLED','User login is not configured on this environment.');
+          }
+          await requireHistorySchema(env);
+          if(url.pathname.endsWith('/logout')) {
+            await revokeUserSession(request,env);
+            const response=json({authenticated:false});response.headers.set('Set-Cookie',userSessionCookie('',0));return response;
+          }
+          if(sessionPath) {
+            const user=await readUserSession(request,env,now());
+            const response=json(user?{authenticated:true,user:publicUserSession(user),enabled:true}:{authenticated:false,enabled:true});
+            return response;
+          }
+          const body=await readJson(request) as any;requestFields(body,['username','password']);
+          const user=await authenticateSharingUser(request,body.username,body.password,env,now());
+          const session=await createUserSession(user,request,env,now());
+          const response=json({authenticated:true,user:publicUserSession(session.user),enabled:true});response.headers.set('Set-Cookie',session.cookie);return response;
+        }
         if(url.pathname==='/api/shares/admin/users/disable-batch') {
           if(request.method!=='POST')throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
           await authenticate(request,env);
@@ -690,9 +735,9 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           const viewToken=await decryptSource(record.view_token_ciphertext,`view-token:${record.token_hash}`,env);
           if(TOKEN.test(viewToken)&&await hashToken(viewToken)===record.token_hash)viewUrl=new URL(`/s/${viewToken}`,request.url).href;
         } catch { /* A missing old view address does not grant or remove edit access. */ }
-        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),role:record.role,revision:record.revision??1,...(record.auth_epoch!==undefined?{historyEnabled:true,includeWorkspace:!!record.include_workspace,editingEnabled:!!record.editing_enabled,workspaceVersion:record.workspace_version??1}:{}),...(viewUrl?{viewUrl}:{}) });
+        return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),workspaceName:record.label||'',role:record.role,revision:record.revision??1,...(record.auth_epoch!==undefined?{historyEnabled:true,includeWorkspace:!!record.include_workspace,editingEnabled:!!record.editing_enabled,workspaceVersion:record.workspace_version??1}:{}),...(viewUrl?{viewUrl}:{}) });
       } catch (error) {
-        if (error instanceof ShareError) return json({ error: { code:error.code,message:error.message } },error.status);
+        if (error instanceof ShareError || error instanceof SessionError) return json({ error: { code:error.code,message:error.message } },error.status);
         // Never echo SQL, secrets, user annotations or upstream URL/error bodies.
         return json({ error: { code:'SHARING_UNAVAILABLE',message:'Protected sharing is temporarily unavailable.' } },503);
       }

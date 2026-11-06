@@ -1,0 +1,31 @@
+# Login and workspace sharing
+
+This flow uses the sharing accounts already assigned in **/admin/shares → Sharing users**. The administrator password remains administration-only.
+
+## Publish a workspace
+
+1. Click **Log in** on the viewer's front page. Enter your assigned sharing username and password in the small login window.
+2. Load a supported self-contained Dropbox STL, 3MF or GLB, or open an existing public model-only link, then open **Share model**. The source stays concealed when creating a workspace from a model-only link.
+3. Select **Share workspace**, enter its **Workspace name** and **Expiry date and time**, then create the link. Expiry must be in the future and at most 180 days from creation.
+4. Share the generated QR/address through the existing Copy Link or WhatsApp controls. The original Dropbox address is excluded.
+
+Without login, the current public model-only flow remains available and excludes analytics/revision history. Re-sharing an existing workspace uses the current login and keeps its original address, name, history and expiry; the admin manager controls changes to existing names/deadlines.
+
+## Open and update a shared workspace
+
+Recipients need **no login or password**. The compact workspace row shows its name and revision. Click the row to expand or retract **Workspace Revision**, expiry and display-name controls. History is fetched when first expanded, rather than on every model opening.
+
+Recipients can modify supported analytical objects and mesh show/hide/opacity. They enter a display name and explicitly click **Save Workspace** to publish a new revision. The first Save click expands the name field if needed; it does not silently save under an empty name. Loading a historical revision replaces local unsaved changes only after confirmation, and a subsequent Save creates a new revision. Concurrent saves are rejected with a conflict.
+
+Existing admin view-only settings remain enforced. Legacy records upgraded from schema 2 start with editing disabled; the admin must enable **Public view + public editing** for those records. New workspace links enable recipient saves by default. Display names are self-reported, not recipient accounts.
+
+## Session and permissions foundation
+
+- The login lasts up to eight hours. Reloading the page restores identity through a same-origin session endpoint; the application does not persist passwords or bearer tokens in Web Storage.
+- The cookie is host-only, Secure, HttpOnly and SameSite=Strict. It contains a signed opaque session reference bound to its environment/origin; session identifiers are hashed in D1.
+- Logout deletes its server-side session marker. Sharing-user password changes and enable/disable actions invalidate that user's existing sessions through the credential version checked on each protected request.
+- Sessions reuse the existing scheduled-expiry table under a separate `session:` namespace. They are capped at 10 per user and 500 globally, and use indexed prefix lookups. The current schema-3 database, bindings and secrets suffice: **no new SQL migration or Cloudflare setting is required**.
+- `UserSessionProvider` / `useUserSession` expose identity and permission state for the interface. `readUserSession` / `requireUserPermission` enforce permissions at the Worker. The current granted capability is `workspace:share`; future advanced capabilities must be assigned and checked on the server. Hiding a button is not authorization.
+- Previously opened clients may continue using the authenticated per-share credential API. The new interface uses login cookies and does not resend the password on each share. Public model downloads and recipient saves continue to omit login credentials.
+
+The existing 20-revision, 64 MiB history budget, source validation, fixed maximum lifetime and revocation/cleanup policies remain in force. Files stay at Dropbox; the platform stores workspace metadata only.

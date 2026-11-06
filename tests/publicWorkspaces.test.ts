@@ -31,7 +31,7 @@ async function ensureUser(worker:ReturnType<typeof createShareWorker>,env:ShareE
 }
 async function create(worker:ReturnType<typeof createShareWorker>,env:ShareEnvironment,includeWorkspace=true){
   if(includeWorkspace)await ensureUser(worker,env);
-  const response=await worker.fetch(request('/api/shares','POST',{sourceUrl:'https://www.dropbox.com/scl/fi/synthetic/model.3mf?rlkey=secret-source',modelIdentity:identity,workspace:workspace(),includeWorkspace,...(includeWorkspace?{sharingUsername:'sharer.one',sharingPassword:password}:{})}),env);
+  const response=await worker.fetch(request('/api/shares','POST',{sourceUrl:'https://www.dropbox.com/scl/fi/synthetic/model.3mf?rlkey=secret-source',modelIdentity:identity,workspace:workspace(),label:'Test workspace',includeWorkspace,...(includeWorkspace?{sharingUsername:'sharer.one',sharingPassword:password}:{})}),env);
   assert.equal(response.status,201,await response.clone().text());return response.json() as Promise<any>;
 }
 function save(token:string,revision:number,author='Editor One',hidden=false){return request(`/api/shares/${token}`,'PUT',{workspace:workspace(hidden),modelIdentity:identity,revision,author});}
@@ -182,5 +182,113 @@ test('batch disabling sharing users leaves their public recipient access separat
     assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM share_users WHERE active=1').get() as any).n,0);
     assert.equal((await worker.fetch(request(`/api/shares/${share.token}/share-link`,'POST',{username:'sharer.one',password}),env)).status,401);
     assert.equal((await worker.fetch(save(share.token,1),env)).status,200);
+  }finally{env.SHARES_DB.db.close();}
+});
+
+async function signIn(worker:ReturnType<typeof createShareWorker>,env:ShareEnvironment){
+  await ensureUser(worker,env);
+  const response=await worker.fetch(request('/api/shares/login','POST',{username:'sharer.one',password}),env);
+  assert.equal(response.status,200,await response.clone().text());
+  return {cookie:response.headers.get('Set-Cookie')!.split(';')[0],headers:response.headers,body:await response.json() as any};
+}
+function withCookie(input:Request,cookie:string){const headers=new Headers(input.headers);headers.set('Cookie',cookie);return new Request(input,{headers});}
+function namedWorkspace(expiresAt?:string){return {sourceUrl:'https://dl.dropboxusercontent.com/model.3mf',workspace:workspace(),modelIdentity:identity,includeWorkspace:true,label:'Named clinical workspace',...(expiresAt?{expiresAt}:{})};}
+test('a signed-in user can create a named workspace from a concealed model-only link without learning its source',async()=>{
+  const {env,worker}=setup();try{
+    const model=await create(worker,env,false),session=await signIn(worker,env);
+    const body={sourceShareToken:model.token,workspace:workspace(true),modelIdentity:identity,includeWorkspace:true,label:'Workspace from model link',expiresAt:new Date(Date.now()+86_400_000).toISOString()};
+    const publish=(data:any)=>worker.fetch(withCookie(request('/api/shares','POST',data),session.cookie),env);
+    assert.equal((await worker.fetch(request('/api/shares','POST',body),env)).status,401);
+    assert.equal((await publish({...body,modelIdentity:'ab'.repeat(32)})).status,409);
+    assert.equal((await publish({...body,sourceUrl:'https://dl.dropboxusercontent.com/other.3mf'})).status,400);
+    const response=await publish(body);assert.equal(response.status,201,await response.clone().text());const share=await response.json() as any;
+    assert.notEqual(share.token,model.token);assert(!JSON.stringify(share).includes('dropbox'));
+    const metadata=await (await worker.fetch(request(`/api/shares/${share.token}`),env)).json() as any;
+    assert.equal(metadata.includeWorkspace,true);assert.equal(metadata.workspaceName,body.label);assert.equal(metadata.workspace.meshes[0].visible,false);
+    const sources=env.SHARES_DB.db.prepare('SELECT source_ciphertext FROM shares').all() as any[];assert.notEqual(sources[0].source_ciphertext,sources[1].source_ciphertext);
+    assert.equal((await (await worker.fetch(request(`/api/shares/${model.token}`),env)).json() as any).includeWorkspace,false);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('front-page login uses secure revocable cookies and returns a bounded permission profile',async()=>{
+  const {env,worker}=setup();try{
+    const guest=await worker.fetch(request('/api/shares/session'),env);assert.deepEqual(await guest.json(),{authenticated:false,enabled:true});
+    const session=await signIn(worker,env);
+    for(const flag of ['Secure','HttpOnly','SameSite=Strict','Path=/'])assert(session.headers.get('Set-Cookie')!.includes(flag));
+    assert.equal(session.headers.get('Cache-Control'),'no-store, max-age=0');
+    assert.equal(session.body.user.username,'sharer.one');assert.deepEqual(session.body.user.permissions,['workspace:share']);
+    assert(!JSON.stringify(session.body).includes(password));assert(!JSON.stringify(session.body).includes('nonce'));
+    const stored=env.SHARES_DB.db.prepare("SELECT bucket FROM share_rate_limits WHERE bucket LIKE 'session:%'").get() as any;
+    assert(stored);assert(!stored.bucket.includes(session.cookie));
+    const current=await worker.fetch(withCookie(request('/api/shares/session'),session.cookie),env);
+    assert.equal((await current.json() as any).authenticated,true);
+    const adminAttempt=await worker.fetch(withCookie(request('/api/shares/admin'),session.cookie),env);assert.equal(adminAttempt.status,401);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('signed-in workspace publishing validates its name and custom expiry, while guest model sharing stays public',async()=>{
+  const {env,worker}=setup();try{
+    const session=await signIn(worker,env),expiry=new Date(Date.now()+7*86_400_000).toISOString();
+    assert.equal((await worker.fetch(request('/api/shares','POST',namedWorkspace(expiry)),env)).status,401);
+    const publish=(body:any)=>worker.fetch(withCookie(request('/api/shares','POST',body),session.cookie),env);
+    assert.equal((await publish({...namedWorkspace(expiry),label:' '})).status,400);
+    assert.equal((await publish(namedWorkspace(new Date(Date.now()-1).toISOString()))).status,400);
+    assert.equal((await publish(namedWorkspace(new Date(Date.now()+181*86_400_000).toISOString()))).status,400);
+    const response=await publish(namedWorkspace(expiry));assert.equal(response.status,201,await response.clone().text());
+    const share=await response.json() as any;assert.equal(share.expiresAt,expiry);
+    const metadata=await (await worker.fetch(request(`/api/shares/${share.token}`),env)).json() as any;
+    assert.equal(metadata.workspaceName,'Named clinical workspace');assert.equal(metadata.editingEnabled,true);assert.equal(metadata.expiresAt,expiry);
+    assert.equal((await worker.fetch(save(share.token,1,'Guest recipient',true),env)).status,200);
+    const reshared=await worker.fetch(withCookie(request(`/api/shares/${share.token}/share-link`,'POST',{}),session.cookie),env);assert.equal(reshared.status,200);assert.equal((await reshared.json() as any).url,share.url);
+    await create(worker,env,false);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('logout revokes copied sessions on the server without disabling password-free workspace recipients',async()=>{
+  const {env,worker}=setup();try{
+    const session=await signIn(worker,env);
+    const created=await worker.fetch(withCookie(request('/api/shares','POST',namedWorkspace()),session.cookie),env);assert.equal(created.status,201);const share=await created.json() as any;
+    const logout=await worker.fetch(withCookie(request('/api/shares/logout','POST'),session.cookie),env);assert.equal(logout.status,200);assert(logout.headers.get('Set-Cookie')!.includes('Max-Age=0'));
+    const replay=await worker.fetch(withCookie(request('/api/shares/session'),session.cookie),env);assert.equal((await replay.json() as any).authenticated,false);
+    assert.equal((await worker.fetch(withCookie(request('/api/shares','POST',namedWorkspace()),session.cookie),env)).status,401);
+    assert.equal((await worker.fetch(save(share.token,1,'Guest after publisher logout',true),env)).status,200);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('tampered, cross-origin and cross-environment session cookies cannot grant permissions',async()=>{
+  const {env,worker}=setup();try{
+    const session=await signIn(worker,env),dot=session.cookie.lastIndexOf('.');
+    const changed=session.cookie.slice(0,dot+1)+(session.cookie[dot+1]==='a'?'b':'a')+session.cookie.slice(dot+2);
+    const duplicate=session.cookie+'; '+session.cookie;
+    for(const cookie of [changed,duplicate]){
+      const current=await worker.fetch(withCookie(request('/api/shares/session'),cookie),env);assert.equal((await current.json() as any).authenticated,false);
+    }
+    const anotherHost=await worker.fetch(new Request('https://other.example.com/api/shares/session',{headers:{Cookie:session.cookie}}),env);assert.equal((await anotherHost.json() as any).authenticated,false);
+    env.SHARES_ENVIRONMENT='beta';env.SHARES_DB.db.prepare("UPDATE share_environment SET scope='beta'").run();
+    const anotherTier=await worker.fetch(withCookie(request('/api/shares/session'),session.cookie),env);assert.equal((await anotherTier.json() as any).authenticated,false);
+    const hostile=request('/api/shares/logout','POST');hostile.headers.set('Origin','https://attacker.example');assert.equal((await worker.fetch(withCookie(hostile,session.cookie),env)).status,403);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('sharing-user password changes and user disable immediately invalidate existing login sessions',async()=>{
+  const {env,worker}=setup();try{
+    const first=await signIn(worker,env),second=await signIn(worker,env);
+    const user=env.SHARES_DB.db.prepare('SELECT * FROM share_users').get() as any;
+    const changed=await worker.fetch(request(`/api/shares/admin/users/${user.id}`,'PATCH',{updatedAt:user.updated_at,password:'rotated-sharing-login-password'},admin),env);assert.equal(changed.status,200);
+    for(const session of [first,second])assert.equal((await(await worker.fetch(withCookie(request('/api/shares/session'),session.cookie),env)).json() as any).authenticated,false);
+    const login=await worker.fetch(request('/api/shares/login','POST',{username:'sharer.one',password:'rotated-sharing-login-password'}),env);assert.equal(login.status,200);
+    const cookie=login.headers.get('Set-Cookie')!.split(';')[0];
+    const current=env.SHARES_DB.db.prepare('SELECT updated_at FROM share_users').get() as any;
+    assert.equal((await worker.fetch(request(`/api/shares/admin/users/${user.id}`,'PATCH',{updatedAt:current.updated_at,active:false},admin),env)).status,200);
+    assert.equal((await(await worker.fetch(withCookie(request('/api/shares/session'),cookie),env)).json() as any).authenticated,false);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('sessions expire in eight hours and their cleanup leaves permanent workspace revisions intact',async()=>{
+  const {env}=setup();let now=1_800_000_000_000;const worker=createShareWorker({now:()=>now});
+  try{
+    const session=await signIn(worker,env);
+    assert.equal(Date.parse(session.body.user.expiresAt),now+8*60*60*1000);
+    const response=await worker.fetch(withCookie(request('/api/shares','POST',namedWorkspace()),session.cookie),env);assert.equal(response.status,201);const share=await response.json() as any;
+    assert.equal((await worker.fetch(save(share.token,1),env)).status,200);
+    now+=8*60*60*1000+1;
+    assert.equal((await(await worker.fetch(withCookie(request('/api/shares/session'),session.cookie),env)).json() as any).authenticated,false);
+    await cleanupExpiredShares(env,now);
+    assert.equal((env.SHARES_DB.db.prepare("SELECT count(*) AS n FROM share_rate_limits WHERE bucket LIKE 'session:%'").get() as any).n,0);
+    assert.equal((await worker.fetch(request(`/api/shares/${share.token}/revisions`),env)).status,200);
   }finally{env.SHARES_DB.db.close();}
 });
