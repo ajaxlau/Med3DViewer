@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, RotateCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, RotateCw, Pin, PinOff } from 'lucide-react';
+import { shouldIgnoreHover } from '../lib/utils';
 import { listWorkspaceHistory, loadWorkspaceVersion, saveProtectedWorkspace, type WorkspaceHistoryItem } from '../lib/sharedWorkspace';
 import type { ViewerManager } from '../lib/ViewerManager';
 
@@ -16,13 +17,16 @@ export interface SharedWorkspaceSession {
   workspaceVersion?: number;
   workspaceName?: string;
 }
-export function SharedWorkspaceBar({ session, manager, onSaved, openRequest = 0 }: {
+export function SharedWorkspaceBar({ session, manager, onSaved }: {
   session: SharedWorkspaceSession;
   manager: ViewerManager;
   onSaved: (revision: number, expiresAt: string) => void;
-  openRequest?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const container = useRef<HTMLElement | null>(null);
+  const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCollapse = () => { if (collapseTimer.current) clearTimeout(collapseTimer.current); };
   const [status, setStatus] = useState('');
   const [operation, setOperation] = useState<'save' | 'load' | 'refresh' | null>(null);
   const [author, setAuthor] = useState('');
@@ -35,11 +39,10 @@ export function SharedWorkspaceBar({ session, manager, onSaved, openRequest = 0 
   const detailsId = useId();
   const modelMatches = () => manager.modelLoadState.requestId === session.requestId && manager.modelLoadState.phase === 'ready' && manager.loadedModelIdentity === session.modelIdentity;
   useEffect(() => {
-    setAuthor(''); setItems([]); setExpanded(false); setOperation(null); setStatus(''); setFocusAuthor(false);
+    setAuthor(''); setItems([]); setExpanded(false); setPinned(false); setOperation(null); setStatus(''); setFocusAuthor(false);
     setViewing(session.workspaceVersion || 1); setSelected(session.workspaceVersion || 1);
-    return () => { request.current?.abort(); request.current = null; };
+    return () => { clearCollapse(); request.current?.abort(); request.current = null; };
   }, [session.token, session.requestId]);
-  useEffect(() => { if (openRequest) setExpanded(true); }, [openRequest]);
   useEffect(() => {
     if (expanded && focusAuthor && !operation) { authorInput.current?.focus(); setFocusAuthor(false); }
   }, [expanded, focusAuthor, operation]);
@@ -79,17 +82,32 @@ export function SharedWorkspaceBar({ session, manager, onSaved, openRequest = 0 
   const canSave = session.historyEnabled ? session.editingEnabled : session.role === 'edit';
   const field = 'mt-1 block min-h-11 w-full min-w-0 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100';
   if (session.includeWorkspace === false) return null;
-  return <section aria-label="Workspace controls" className="border-b border-zinc-200 bg-zinc-50 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
-    <div>
+  return <section ref={container} aria-label="Workspace controls" onMouseEnter={() => {
+    if (shouldIgnoreHover()) return;
+    clearCollapse(); setExpanded(true);
+  }} onMouseLeave={event => {
+    if (shouldIgnoreHover() || pinned || event.buttons !== 0) return;
+    clearCollapse(); collapseTimer.current = setTimeout(() => {
+      if (container.current?.contains(document.activeElement) || request.current) return;
+      setExpanded(false);
+    },350);
+  }} className="rounded-lg border border-zinc-200 bg-zinc-50/70 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100">
+    <div className="flex items-center pr-3">
       <button type="button" aria-label={`Workspace revisions: ${session.workspaceName || 'Workspace'}, revision ${session.historyEnabled ? viewing : session.revision}`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => {
-        setExpanded(!expanded);
-      }} className="flex min-h-11 w-full min-w-0 items-center gap-2 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 transition-colors hover:bg-zinc-100/70 dark:text-zinc-300 dark:hover:bg-zinc-800/60" title="Workspace revisions">
-        <span className="min-w-0 flex-1 truncate" title={session.workspaceName || 'Workspace'}>{session.workspaceName || 'Workspace'}</span>
+        clearCollapse(); setExpanded(!expanded);
+      }} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 transition-colors hover:bg-zinc-100/70 dark:text-zinc-300 dark:hover:bg-zinc-800/60" title="Workspace revisions">
+        <span className="min-w-0 flex-1 truncate">Workspace Revision</span>
         <span className="shrink-0 text-[10px]">v{session.historyEnabled ? viewing : session.revision}</span>
         {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
+      <button type="button" aria-label="Pin workspace revisions" aria-pressed={pinned} title={pinned ? 'Unpin workspace revisions' : 'Keep workspace revisions open'} onClick={() => {
+        clearCollapse(); setPinned(!pinned); if (!pinned) setExpanded(true);
+      }} className={`flex min-h-8 min-w-8 items-center justify-center rounded transition-colors ${pinned ? 'bg-blue-100/80 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200'}`}>
+        {pinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
+      </button>
     </div>
     {expanded && <div id={detailsId} className="space-y-3 px-4 pb-3">
+      {session.workspaceName && <p className="truncate text-xs font-medium" title={session.workspaceName}>{session.workspaceName}</p>}
       {session.historyEnabled && session.includeWorkspace && <>
         <div className="flex items-end gap-1">
           <label className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Workspace Revision<select aria-label="Workspace Revision" disabled={operation === 'save' || expired || !items.length} className={field} value={selected} onChange={event => switchRevision(Number(event.target.value))}>

@@ -4,9 +4,8 @@ import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy
 import { ModelStatusCard } from './ModelStatusCard';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
-import type { ReactNode } from 'react';
 
-export function Sidebar({ collapsed, onClose, workspaceControls }: { collapsed: boolean, onClose?: () => void, workspaceControls?: ReactNode }) {
+export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: () => void }) {
   const { 
     status, loadingProgress, filename, meshes, globalOpacity, setGlobalOpacity, 
     toggleMeshVisibility, toggleAllMeshesVisibility, invertMeshesVisibility, setMeshOpacity, highlightMesh, highlightedMeshId,
@@ -134,7 +133,6 @@ export function Sidebar({ collapsed, onClose, workspaceControls }: { collapsed: 
           )}
         </div>}
 
-        {workspaceControls}
         {!collapsed && <>
 
         {/* Section: Mesh Visibility */}

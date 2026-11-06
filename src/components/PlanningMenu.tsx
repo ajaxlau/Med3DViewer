@@ -1,6 +1,6 @@
 import { useViewer } from '../context/ViewerContext';
 import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff, Layers } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
 
@@ -11,7 +11,7 @@ const DEFAULT_CYLINDER_DIAMETER = 1;
 const DEFAULT_CYLINDER_EXTENSION = 20;
 const DEFAULT_CURVE_THICKNESS = 0.2;
 
-export function PlanningMenu() {
+export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactNode }) {
   const { 
     activeModal, setActiveModal, 
     planningMode, setPlanningMode, 
@@ -153,6 +153,9 @@ export function PlanningMenu() {
 
   return (
     <aside 
+      aria-label="Analytic Tools"
+      aria-hidden={collapsed}
+      inert={collapsed}
       className={`transition-all duration-300 bg-white dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 z-10 ${
         collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[320px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 flex'
       }`}
@@ -162,7 +165,7 @@ export function PlanningMenu() {
           <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-100 uppercase tracking-widest flex items-center gap-2">
              Analytic Tools
           </h3>
-          <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={() => setActiveModal(null)}>
+          <button aria-label="Close analytic tools" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={() => setActiveModal(null)}>
             <X size={16} />
           </button>
         </div>
@@ -599,6 +602,8 @@ export function PlanningMenu() {
             </div>
           </div>
         </div>
+
+        {workspaceControls}
 
         {/* Retractable Project IO Section */}
         <div 

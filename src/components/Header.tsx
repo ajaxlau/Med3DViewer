@@ -1,4 +1,4 @@
-import { Link, Share2, Ruler, Moon, Sun, PenTool, Camera, RotateCcw, Info, FolderClock } from 'lucide-react';
+import { Link, Share2, Ruler, Moon, Sun, PenTool, Camera, RotateCcw, Info } from 'lucide-react';
 import { useViewer } from '../context/ViewerContext';
 import { UserLogin } from './UserLogin';
 import { Tooltip } from './Tooltip';
@@ -33,10 +33,9 @@ export function VisualizationMenuIcon({ size = 18, className = "" }: { size?: nu
 }
 
 export function Header({
-  toggleSidebar, onOpenWorkspace
+  toggleSidebar
 }: {
   toggleSidebar: () => void;
-  onOpenWorkspace?: () => void;
 }) {
   const {
     theme, setTheme, activeModal, setActiveModal, toggleRulers, rulersVisible
@@ -116,15 +115,10 @@ export function Header({
           </button>
         </Tooltip>
 
-        {onOpenWorkspace && <Tooltip content="Workspace revisions">
-          <button aria-label="Workspace revisions" className="w-8 h-8 rounded shrink-0 flex items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400" onClick={onOpenWorkspace}>
-            <FolderClock size={18} />
-          </button>
-        </Tooltip>}
         <Tooltip content="Analytic Tools">
           <button
             aria-label="Analytic Tools"
-            className={`hidden sm:flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`}
+            className={`flex w-8 h-8 rounded shrink-0 items-center justify-center transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-blue-600 dark:hover:text-blue-400 ${activeModal === 'planning' ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''}`}
             onClick={() => setActiveModal(activeModal === 'planning' ? null : 'planning')}
           >
             <PenTool size={18} />
