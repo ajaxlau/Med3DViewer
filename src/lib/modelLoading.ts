@@ -1,4 +1,5 @@
 import type { GpuCapabilities } from './gpuDetection';
+import { validate3mfPackage, validateGlbPackage } from './modelPackages';
 
 export type ModelLoadPhase =
   | 'idle'
@@ -126,7 +127,8 @@ export function validateRemoteModelUrl(rawUrl: string): URL {
   return url;
 }
 
-export async function validateLocalFiles(files: File[], profile: DeviceLoadProfile): Promise<{ primaryName: string; totalBytes: number; warning: string | null }> {
+export async function validateLocalFiles(files: File[], profile: DeviceLoadProfile, options: { requireSelfContained?: boolean; signal?: AbortSignal } = {}): Promise<{ primaryName: string; totalBytes: number; warning: string | null; protectedShareable: boolean }> {
+  options.signal?.throwIfAborted();
   if (!files.length) throw new ModelLoadException('FORMAT_UNSUPPORTED', 'No files were selected.');
   if (files.length > 512) throw new ModelLoadException('SIZE_LIMIT', 'Too many files were selected.', 'Package the model and its dependencies into a smaller, supported project.');
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -141,10 +143,25 @@ export async function validateLocalFiles(files: File[], profile: DeviceLoadProfi
   const primary = files.find(file => PRIMARY_EXTENSIONS.has(getFileExtension(file.name)));
   if (!primary) throw new ModelLoadException('FORMAT_UNSUPPORTED', 'No supported primary 3D model was selected.');
   await sniffModelFile(primary);
+  options.signal?.throwIfAborted();
+  const extension = getFileExtension(primary.name);
+  let protectedShareable = true;
+  try {
+    if (extension === '3mf') await validate3mfPackage(primary, profile, options.signal);
+    if (extension === 'glb') {
+      try { await validateGlbPackage(primary, profile); }
+      catch (error) { if(options.requireSelfContained)throw error;protectedShareable=false; }
+    }
+  } catch (error) {
+    if(error instanceof DOMException&&error.name==='AbortError')throw error;
+    const message=error instanceof Error?error.message:'The model package is invalid.';
+    throw new ModelLoadException(/exceeds|limit/i.test(message)?'SIZE_LIMIT':'FORMAT_MISMATCH',message);
+  }
+  options.signal?.throwIfAborted();
   const warning = totalBytes > profile.softLimitBytes
     ? `Large model: ${(totalBytes / MB).toFixed(1)} MB. ${profile.name} mode will use conservative rendering settings.`
     : null;
-  return { primaryName: primary.name, totalBytes, warning };
+  return { primaryName: primary.name, totalBytes, warning, protectedShareable };
 }
 
 export async function sniffModelFile(file: Blob & { name?: string }): Promise<void> {
@@ -154,7 +171,7 @@ export async function sniffModelFile(file: Blob & { name?: string }): Promise<vo
   if (extension === 'glb' && (bytes.length < 12 || String.fromCharCode(...bytes.slice(0, 4)) !== 'glTF')) {
     throw new ModelLoadException('FORMAT_MISMATCH', 'This file does not contain a valid GLB header.', 'Re-export the model as GLB.');
   }
-  if (extension === 'zip' && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
+  if (['zip', '3mf'].includes(extension) && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
     throw new ModelLoadException('FORMAT_MISMATCH', 'This file does not contain a valid ZIP header.', 'Recreate the planning bundle.');
   }
   if (extension === 'stl' && file.size >= 84) {

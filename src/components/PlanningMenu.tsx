@@ -1,6 +1,7 @@
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { useViewer } from '../context/ViewerContext';
-import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Pin, PinOff, Layers } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Layers } from 'lucide-react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
 
@@ -11,7 +12,7 @@ const DEFAULT_CYLINDER_DIAMETER = 1;
 const DEFAULT_CYLINDER_EXTENSION = 20;
 const DEFAULT_CURVE_THICKNESS = 0.2;
 
-export function PlanningMenu() {
+export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactNode }) {
   const { 
     activeModal, setActiveModal, 
     planningMode, setPlanningMode, 
@@ -23,6 +24,7 @@ export function PlanningMenu() {
   const [newGroupName, setNewGroupName] = useState('');
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [projectIoError, setProjectIoError] = useState('');
   
   // Analytics retractable state
   const [isToolsExpanded, setIsToolsExpanded] = useState(true);
@@ -66,7 +68,7 @@ export function PlanningMenu() {
         return;
       }
       setIsToolsExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   // Project IO hover handlers
@@ -90,7 +92,7 @@ export function PlanningMenu() {
         return;
       }
       setIsProjectIoExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   // Object List hover handlers
@@ -114,7 +116,7 @@ export function PlanningMenu() {
         return;
       }
       setIsObjectListExpanded(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   useEffect(() => {
@@ -152,6 +154,9 @@ export function PlanningMenu() {
 
   return (
     <aside 
+      aria-label="Analytic Tools"
+      aria-hidden={collapsed}
+      inert={collapsed}
       className={`transition-all duration-300 bg-white dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 z-10 ${
         collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[320px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 flex'
       }`}
@@ -161,7 +166,7 @@ export function PlanningMenu() {
           <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-100 uppercase tracking-widest flex items-center gap-2">
              Analytic Tools
           </h3>
-          <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={() => setActiveModal(null)}>
+          <button aria-label="Close analytic tools" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={() => setActiveModal(null)}>
             <X size={16} />
           </button>
         </div>
@@ -205,29 +210,13 @@ export function PlanningMenu() {
               )}
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              {/* Pin button */}
-              <button
-                onClick={() => setIsToolsPinned(!isToolsPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isToolsPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isToolsPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isToolsPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              {/* Expand / Retract Chevron */}
-              <button
-                onClick={() => setIsToolsExpanded(!isToolsExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isToolsExpanded ? "Minimize analytics section" : "Expand analytics section"}
-              >
-                {isToolsExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="analytics" expanded={isToolsExpanded} pinned={isToolsPinned} onPin={() => {
+                if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+                setIsToolsPinned(!isToolsPinned); if (!isToolsPinned) setIsToolsExpanded(true);
+              }} onToggle={() => {
+                if (collapseTimerRef.current) clearTimeout(collapseTimerRef.current);
+                setIsToolsExpanded(!isToolsExpanded);
+              }} />
           </div>
 
           {/* Collapsed Compact State / Quick Active Bar */}
@@ -308,7 +297,7 @@ export function PlanningMenu() {
 
           {/* Full Expanded Tools Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isToolsExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -599,6 +588,8 @@ export function PlanningMenu() {
           </div>
         </div>
 
+        {workspaceControls}
+
         {/* Retractable Project IO Section */}
         <div 
           ref={projectIoContainerRef}
@@ -623,32 +614,19 @@ export function PlanningMenu() {
               </span>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsProjectIoPinned(!isProjectIoPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isProjectIoPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isProjectIoPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isProjectIoPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              <button
-                onClick={() => setIsProjectIoExpanded(!isProjectIoExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isProjectIoExpanded ? "Minimize project IO section" : "Expand project IO section"}
-              >
-                {isProjectIoExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="project IO" expanded={isProjectIoExpanded} pinned={isProjectIoPinned} onPin={() => {
+                if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+                setIsProjectIoPinned(!isProjectIoPinned); if (!isProjectIoPinned) setIsProjectIoExpanded(true);
+              }} onToggle={() => {
+                if (projectIoTimerRef.current) clearTimeout(projectIoTimerRef.current);
+                setIsProjectIoExpanded(!isProjectIoExpanded);
+              }} />
           </div>
 
+          {projectIoError && <p role="alert" className="px-3 py-2 text-xs text-red-700 dark:text-red-300">{projectIoError}</p>}
           {/* Expanded Project IO Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isProjectIoExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -673,10 +651,11 @@ export function PlanningMenu() {
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file && viewerManager) {
+                                    setProjectIoError('');
                                     try {
                                         await viewerManager.importPlanningObjectsZip(file);
                                     } catch (err) {
-                                        console.error("Error importing planning objects:", err);
+                                        setProjectIoError(err instanceof Error ? err.message : 'The planning project could not be imported. Check the file and try again.');
                                     }
                                 }
                                 if (fileInputRef.current) fileInputRef.current.value = '';
@@ -700,10 +679,11 @@ export function PlanningMenu() {
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file && viewerManager) {
+                                    setProjectIoError('');
                                     try {
                                         await viewerManager.importCustomPlanningModel(file);
                                     } catch (err) {
-                                        console.error("Error importing custom model STL:", err);
+                                        setProjectIoError(err instanceof Error ? err.message : 'The custom STL could not be imported. Check the file and try again.');
                                     }
                                 }
                                 if (stlInputRef.current) stlInputRef.current.value = '';
@@ -785,32 +765,18 @@ export function PlanningMenu() {
               </span>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsObjectListPinned(!isObjectListPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isObjectListPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isObjectListPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isObjectListPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-
-              <button
-                onClick={() => setIsObjectListExpanded(!isObjectListExpanded)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={isObjectListExpanded ? "Minimize object list section" : "Expand object list section"}
-              >
-                {isObjectListExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="object list" expanded={isObjectListExpanded} pinned={isObjectListPinned} onPin={() => {
+                if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
+                setIsObjectListPinned(!isObjectListPinned); if (!isObjectListPinned) setIsObjectListExpanded(true);
+              }} onToggle={() => {
+                if (objectListTimerRef.current) clearTimeout(objectListTimerRef.current);
+                setIsObjectListExpanded(!isObjectListExpanded);
+              }} />
           </div>
 
           {/* Expanded Object List Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isObjectListExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >

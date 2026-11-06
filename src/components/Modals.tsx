@@ -1,23 +1,19 @@
-import { useState, useEffect } from 'react';
+import { ModelShareDialog } from './ModelShareDialog';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { QRCodeSVG } from 'qrcode.react';
-import JSZip from 'jszip';
+import { loadZip } from '../lib/loadZip';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
-import logoImg from '../assets/logo.png';
 import { GpuStatusModal } from './GpuStatusModal';
-import { InfoModal } from './InfoModal';
+const InfoModal = lazy(() => import('./InfoModal').then(module => ({ default: module.InfoModal })));
 import { LargeModelGuideModal } from './LargeModelGuideModal';
 import { dataURIToBlob, safeOpenWindow } from '../lib/utils';
+
 
 export function Modals() {
   const { activeModal, setActiveModal, filename, loadedUrl, isEmpty, resetWorkspace } = useViewer();
 
   // URL Modal state
   const [urlInput, setUrlInput] = useState('');
-
-  // Share state based on preview mode (blob) vs deployed
-  const [shareVal, setShareVal] = useState('');
-  const [isSandbox, setIsSandbox] = useState(false);
 
   // Snapshot modal states
   const [snapRes, setSnapRes] = useState('medium');
@@ -31,22 +27,6 @@ export function Modals() {
   const [shareFeedback, setShareFeedback] = useState('');
 
   useEffect(() => {
-    if (activeModal === 'share') {
-      let baseUrl = window.location.href.split('#')[0].split('?')[0];
-      const isSandboxUrl = baseUrl.startsWith('blob:') || baseUrl.includes('.webcomponent.local') || window.location.hostname === 'localhost' || window.location.hostname.includes('.run.app');
-      setIsSandbox(isSandboxUrl);
-      
-      if (!isEmpty && loadedUrl) {
-         if (isSandboxUrl) {
-           setShareVal(`https://ajaxlau.github.io/New3DViewer/#model=${encodeURIComponent(loadedUrl)}`);
-         } else {
-           setShareVal(`${baseUrl}#model=${encodeURIComponent(loadedUrl)}`);
-         }
-      } else {
-         setShareVal('');
-      }
-    }
-    
     if (activeModal === 'snapshot' && window._viewerManagerInstance && !isEmpty) {
       // Create a quick preview render
       const container = document.getElementById('viewer-container');
@@ -68,37 +48,6 @@ export function Modals() {
       window._viewerManagerInstance.loadUrl(urlInput.trim());
       setUrlInput('');
       setActiveModal(null);
-    }
-  };
-
-  const [copied, setCopied] = useState(false);
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } else {
-        throw new Error("Clipboard API not available");
-      }
-    } catch (err) {
-      // Fallback
-      const textArea = document.createElement("textarea");
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.top = '-999999px';
-      textArea.style.left = '-999999px';
-      document.body.appendChild(textArea);
-      textArea.select();
-      try {
-        document.execCommand('copy');
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (e) {
-        console.warn("Failed to copy", e);
-      }
-      document.body.removeChild(textArea);
     }
   };
 
@@ -186,7 +135,8 @@ export function Modals() {
     if (captured360.length === 0) return;
     const dlBaseName = (filename || 'snapshot').replace(/\.[^/.]+$/, "");
     try {
-      const zip = new JSZip();
+      const Zip = await loadZip();
+      const zip = new Zip();
       captured360.forEach((snap) => {
         const base64Data = snap.dataUrl.split(',')[1];
         zip.file(`${dlBaseName}_${snap.angle}deg.png`, base64Data, { base64: true });
@@ -254,14 +204,15 @@ export function Modals() {
   };
 
   if (!activeModal || activeModal === 'planning') return null;
+  if (activeModal === 'share') return <ModelShareDialog onClose={()=>setActiveModal(null)} />;
 
   if (activeModal === 'info') {
-    return <InfoModal onClose={() => setActiveModal(null)} />;
+    return <Suspense fallback={<div role="status" className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"><div className="rounded bg-white dark:bg-zinc-900 p-6 text-sm">Loading guide… <button className="ml-3 min-h-11 underline" onClick={() => setActiveModal(null)}>Close</button></div></div>}><InfoModal onClose={() => setActiveModal(null)} /></Suspense>;
   }
 
   return (
     <div className="fixed inset-0 bg-zinc-900/60 z-[1000] flex items-center justify-center fade-in p-4">
-      <div className="bg-white dark:bg-zinc-900 p-8 rounded-sm shadow-xl outline-none border border-zinc-200 dark:border-zinc-800" 
+      <div className="max-h-[90dvh] overflow-y-auto bg-white dark:bg-zinc-900 p-5 sm:p-8 rounded-sm shadow-xl outline-none border border-zinc-200 dark:border-zinc-800" 
            style={{ width: activeModal === 'snapshot' ? '750px' : '450px', maxWidth: '100%' }}>
         
         {/* -- RESET WORKSPACE CONFIRMATION MODAL -- */}
@@ -329,102 +280,6 @@ export function Modals() {
               <button className="px-5 py-2.5 rounded-sm text-xs font-bold uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-700 border-none" onClick={handleLoadUrl}>Load</button>
             </div>
           </>
-        )}
-
-        {/* -- SHARE MODAL -- */}
-        {activeModal === 'share' && (
-           <>
-            <h3 className="text-[11px] uppercase tracking-widest font-bold mb-3 text-zinc-800 dark:text-zinc-200">Share Model</h3>
-            {!loadedUrl ? (
-                <p className="text-sm text-red-500 mb-5 font-mono">Please load a model from a URL first before sharing. Local files cannot be shared via link.</p>
-            ) : (
-                <>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5 font-mono">
-                  {isSandbox && <><strong className="text-red-500">Preview Mode:</strong> You are in a temporary sandbox. Once deployed, it will look like this:<br/><br/></>}
-                  Scan the QR code or copy the link below to share this model:
-                </p>
-                <div className="flex flex-col gap-4 mb-6">
-                  <div className="bg-white p-4 rounded-md border border-zinc-200 dark:border-zinc-800 mx-auto shadow-sm flex items-center justify-center relative">
-                    <QRCodeSVG 
-                      value={shareVal} 
-                      size={168} 
-                      level={"H"} 
-                      imageSettings={{
-                        src: logoImg,
-                        x: undefined,
-                        y: undefined,
-                        height: 38,
-                        width: 38,
-                        excavate: true,
-                      }}
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <img 
-                        src={logoImg} 
-                        alt="3DPO Logo" 
-                        className="w-[36px] h-[36px] object-contain"
-                      />
-                    </div>
-                  </div>
-                  <input readOnly value={shareVal} className="w-full p-3 border border-zinc-300 dark:border-zinc-700 rounded-sm bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-mono text-sm outline-none" />
-                </div>
-                </>
-            )}
-            <div className="flex justify-end items-center gap-3 mt-6 w-full">
-              <button 
-                className="flex-1 max-w-[120px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest border border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors flex items-center justify-center text-center font-bold" 
-                onClick={() => setActiveModal(null)}
-              >
-                Close
-              </button>
-              {loadedUrl && (
-                <>
-                  {activeModal === 'share' && (
-                      <button 
-                        className="flex-1 max-w-[130px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest bg-green-600 text-white hover:bg-green-700 border-none shadow-sm transition-colors flex items-center justify-center gap-1.5 text-center font-bold" 
-                        onClick={async () => {
-                            let sharedOk = false;
-                            const shareText = shareVal;
-                            if (window._viewerManagerInstance) {
-                                try {
-                                    const dataUrl = window._viewerManagerInstance.captureSnapshot(1920, 1080, false);
-                                    if (dataUrl && navigator.canShare) {
-                                        const blob = dataURIToBlob(dataUrl);
-                                        const dlName = filename || 'snapshot';
-                                        const file = new File([blob], `${dlName.replace(/\.[^/.]+$/, "")}_snapshot.png`, { type: 'image/png' });
-                                        if (navigator.canShare({ files: [file] })) {
-                                            await navigator.share({
-                                                title: '3D Model',
-                                                text: shareText,
-                                                files: [file]
-                                            });
-                                            sharedOk = true;
-                                        }
-                                    }
-                                } catch (e) {
-                                    console.warn('Share with image failed', e);
-                                }
-                            }
-                            if (!sharedOk) {
-                                const url = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
-                                safeOpenWindow(url);
-                            }
-                        }}
-                      >
-                        <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                        <span className="truncate">WhatsApp</span>
-                      </button>
-                  )}
-                  <button 
-                    className="flex-1 max-w-[130px] h-10 px-3 rounded-sm text-xs font-bold uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-700 border-none shadow-sm transition-colors flex items-center justify-center text-center font-bold" 
-                    onClick={() => copyToClipboard(shareVal)}
-                  >
-                    <span className="truncate">{copied ? "Copied!" : "Copy Link"}</span>
-                  </button>
-                </>
-              )}
-            </div>
-           </>
         )}
 
         {/* -- SNAPSHOT MODAL -- */}

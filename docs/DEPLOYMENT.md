@@ -1,9 +1,13 @@
 # Cloudflare Workers build and preview runbook
 
-This client-only Vite app publishes static assets to the existing Worker
-`ntec3dpo-m3dv`. `wrangler.jsonc` is the only deployment configuration. It declares
-`assets.directory = "./dist"` and SPA navigation fallback; no Worker script entry
-point, application secret, or database is required.
+The Vite viewer publishes assets through `worker/entry.ts` to the existing Worker
+`ntec3dpo-m3dv`. The ordinary root `wrangler.jsonc` keeps protected sharing disabled
+and needs no database or application secrets. Generated sharing configurations
+supply tier-specific D1 bindings and runtime variables when explicitly selected.
+
+For the current PR #12 → beta handoff, use [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md).
+The settings below describe ordinary production and generic feature previews;
+beta's protected-sharing Preview uses its separate command and resources.
 
 ## Confirmed failure and repair
 
@@ -50,7 +54,8 @@ The build command already runs artifact validation before the preview upload.
 Workers Builds has no output-directory field: `./dist` is declared in source.
 Keep development dependencies installed during the build so Vite, TypeScript,
 and the pinned Wrangler CLI are available. No application runtime secrets or
-bindings are needed in Production or Previews Base for this static app.
+bindings are needed while sharing is disabled in the ordinary configuration.
+Protected beta sharing uses the separate setup linked above.
 
 The owner-selected `med3dviewer build token` successfully uploaded a preview on
 2026-10-26. The two previously bound deployment-token references returned

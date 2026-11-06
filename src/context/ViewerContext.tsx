@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect, ReactNode } from 'react';
 import { ViewerManager, FlyThroughState, SplineClippingState } from '../lib/ViewerManager';
 import { createIdleLoadState, ModelLoadState } from '../lib/modelLoading';
+import { createPlaybackPublisher } from '../lib/playbackNotifications';
 
 export interface MeshInfo {
   id: number;
@@ -422,6 +423,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
 
   const initManagerIfReady = () => {
     if (containerRef.current && !viewerManager) {
+      const publishPlayback = createPlaybackPublisher<FlyThroughState>(setFlyThroughState);
       const manager = new ViewerManager(containerRef.current, {
         onStatusChange: (newStatus, empty, name, url) => {
           setStatus(newStatus);
@@ -446,7 +448,7 @@ export function ViewerProvider({ children }: { children: ReactNode }) {
           setPlanningModeState(mode as any);
           setResnappingAnnotationIdState(resnapId || null);
         },
-        onFlyThroughStateChange: (state) => setFlyThroughState({ ...state }),
+        onFlyThroughStateChange: publishPlayback,
         onSplineClippingStateChange: (state) => setSplineClippingState({ ...state }),
         onGpuTierChange: (tier) => setGpuTier(tier),
         onContextLostChange: (lost) => setIsContextLost(lost)

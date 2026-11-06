@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useViewer } from '../context/ViewerContext';
-import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight, Pin, PinOff } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight } from 'lucide-react';
 import { ModelStatusCard } from './ModelStatusCard';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
@@ -59,7 +60,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
     meshVisTimerRef.current = setTimeout(() => {
       if (meshVisRef.current?.contains(document.activeElement)) return;
       setMeshVisOpen(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   const handleAdvancedMouseEnter = () => {
@@ -81,7 +82,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
     advancedTimerRef.current = setTimeout(() => {
       if (advancedRef.current?.contains(document.activeElement)) return;
       setAdvancedOpen(false);
-    }, 350);
+    }, SECTION_COLLAPSE_DELAY_MS);
   };
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
     };
   }, []);
 
-  const availableCurves = (planningObjects || []).filter(o => o.type === 'curve');
+  const availableCurves = useMemo(() => (planningObjects || []).filter(o => o.type === 'curve'), [planningObjects]);
 
   useEffect(() => {
     if (availableCurves.length > 0) {
@@ -106,29 +107,29 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
 
   return (
     <aside 
-      onMouseLeave={(e) => {
-        if (shouldIgnoreHover()) return;
-        if (e.buttons === 0) {
-          if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
-          if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
-          if (!isMeshVisPinned) setMeshVisOpen(false);
-          if (!isAdvancedPinned) setAdvancedOpen(false);
-        }
+      aria-label="Visualization Tools"
+      aria-hidden={collapsed}
+      inert={collapsed}
+      onMouseLeave={(event) => {
+        handleMeshVisMouseLeave(event);
+        handleAdvancedMouseLeave(event);
       }}
       className={`transition-all duration-300 bg-zinc-50 dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 ${collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[280px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 flex'}`}
     >
       <div className="flex flex-col w-full min-h-min pb-5">
         
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+        {!collapsed && <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
           <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-100 uppercase tracking-widest flex items-center gap-2">
             Visualization Tools
           </h3>
           {onClose && (
-            <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={onClose}>
+            <button aria-label="Close visualization tools" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={onClose}>
               <X size={16} />
             </button>
           )}
-        </div>
+        </div>}
+
+        {!collapsed && <>
 
         {/* Section: Mesh Visibility */}
         <div 
@@ -145,33 +146,17 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
             }}
           >
             <span>Mesh Visibility</span>
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsMeshVisPinned(!isMeshVisPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isMeshVisPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isMeshVisPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isMeshVisPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-              <button
-                onClick={() => {
-                  if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
-                  setMeshVisOpen(!meshVisOpen);
-                }}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={meshVisOpen ? "Minimize section" : "Expand section"}
-              >
-                {meshVisOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="mesh visibility" expanded={meshVisOpen} pinned={isMeshVisPinned} onPin={() => {
+                if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+                setIsMeshVisPinned(!isMeshVisPinned); if (!isMeshVisPinned) setMeshVisOpen(true);
+              }} onToggle={() => {
+                if (meshVisTimerRef.current) clearTimeout(meshVisTimerRef.current);
+                setMeshVisOpen(!meshVisOpen);
+              }} />
           </div>
           
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               meshVisOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -301,33 +286,17 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
             }}
           >
             <span>Advanced Visual Tools</span>
-            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => setIsAdvancedPinned(!isAdvancedPinned)}
-                className={`p-1 rounded transition-colors ${
-                  isAdvancedPinned 
-                    ? 'text-blue-600 dark:text-blue-400 bg-blue-100/80 dark:bg-blue-900/40' 
-                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50'
-                }`}
-                title={isAdvancedPinned ? "Pinned open (click to enable auto-minimize on mouse leave)" : "Auto-minimizes when mouse leaves (click to pin open)"}
-              >
-                {isAdvancedPinned ? <Pin size={13} className="fill-current" /> : <PinOff size={13} />}
-              </button>
-              <button
-                onClick={() => {
-                  if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
-                  setAdvancedOpen(!advancedOpen);
-                }}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded transition-colors"
-                title={advancedOpen ? "Minimize section" : "Expand section"}
-              >
-                {advancedOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-              </button>
-            </div>
+            <SectionControls label="advanced visual tools" expanded={advancedOpen} pinned={isAdvancedPinned} onPin={() => {
+                if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+                setIsAdvancedPinned(!isAdvancedPinned); if (!isAdvancedPinned) setAdvancedOpen(true);
+              }} onToggle={() => {
+                if (advancedTimerRef.current) clearTimeout(advancedTimerRef.current);
+                setAdvancedOpen(!advancedOpen);
+              }} />
           </div>
 
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               advancedOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -813,6 +782,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
         <div className="p-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <ModelStatusCard />
         </div>
+        </>}
       </div>
     </aside>
   );

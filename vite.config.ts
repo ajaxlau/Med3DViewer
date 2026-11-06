@@ -3,16 +3,25 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { navigationFallbackDenylist } from './src/lib/serviceWorkerPolicy';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    base: '/',
+    build: {
+      rollupOptions: {
+        // Large icon/module graphs can exceed Workers Builds' open-file limit.
+        // Bound concurrent reads/writes instead of relying on the host's ulimit.
+        maxParallelFileOps: 32,
+      },
+    },
     plugins: [
       react(), 
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',
+        workbox: { navigateFallbackDenylist: navigationFallbackDenylist },
         includeAssets: ['favicon.ico', 'icon-192.png', 'icon-512.png', '3DPO_Small_Logo.png'],
         manifest: {
           name: 'NTEC3DPO - Med3DViewer',

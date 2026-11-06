@@ -1,6 +1,6 @@
 # Med3DViewer implementation plan for review
 
-Revised: 4 November 2026. Status: proposal only; this commit changes documentation.
+Revised: 5 November 2026. Status: active implementation and acceptance plan. The current isolated test implementation is tracked in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md), with sharing setup in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md).
 
 Review basis: beta [`cd80949abe49`](https://github.com/ajaxlau/Med3DViewer/commit/cd80949abe491c5c4f400a53ea8013552a49b22a), whose application code is unchanged from `582176940cd6`. The README synchronized from main is preserved.
 
@@ -8,7 +8,7 @@ Review basis: beta [`cd80949abe49`](https://github.com/ajaxlau/Med3DViewer/commi
 
 1. Keep the existing platform simple, lightweight and usable on phones/tablets, with conservative CPU, memory and GPU use. For models beyond a device's capacity, investigate automatic reduction with clear notice; otherwise give a useful desktop-browser recommendation before an avoidable failure.
 2. Review and harden the security of the current application, imports, dependencies, local storage, remote loading and deployment.
-3. Improve and debug existing features, with one requested addition: 180-day protected share addresses backed by workspace metadata in D1, without storing model copies. Do not add unrelated functionality.
+3. Improve and debug existing features, with one requested addition: protected workspace addresses backed by D1 metadata, without storing model copies. The approved extension includes self-contained 3MF/GLB sharing, per-mesh display state, public source-concealing URLs with a workspace checkbox, assigned sharing-user credentials, named saved versions, revision-checked explicit saves and a password-protected workspace manager. Keep expiry within 180 days from creation and add no unrelated functionality.
 4. Make the existing Analytic Tools reliable and verify consistent object import/export, including actual interoperability with 3D Slicer.
 
 This revision supersedes the previous proposals for new quality modes, mesh search/filter controls, camera-sharing options, a new mobile tool-sheet design and full undo/redo. Those additions are removed from scope. Internal changes such as worker parsing, deferred imports or binary storage are justified only by a demonstrated defect or performance bottleneck in an existing workflow. Avoid a framework/renderer rewrite, new formats, new analytics tools, model-file cloud storage or additional custom user accounts. The only proposed backend exception is the narrowly scoped D1 share-record service and controlled model-streaming handler in Workstream D; no general-purpose proxy or file-hosting service is included.
@@ -23,7 +23,7 @@ Automatic model reduction is a narrowly scoped feasibility investigation request
 - Historical release checks recorded 16 passing automated tests plus pre-release browser checks. They do not establish complete Analytic Tools correctness, physical-device performance, security assurance or full 3D Slicer compatibility. No new runtime tests or security audit are claimed by this documentation revision.
 - Cloudflare delivery has working build/artifact checks and static-assets configuration. Production release deployment succeeded previously, but the subsequent live browser acceptance was not completed. Keep delivery configuration stable during existing-feature fixes; the later protected-sharing proposal specifies its own Worker/D1 changes and isolated previews. See the [deployment runbook](DEPLOYMENT.md).
 
-## Code findings to address first
+## Baseline code findings and continuing review gates
 
 | Priority | Observed code | Required improvement |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ Exit evidence: a per-object/format compatibility matrix with fixture results, nu
 
 ## Workstream D — expiring share links with D1 metadata only
 
-This is the single requested feature addition to the otherwise maintenance-focused plan. Proposed URL: `https://ntec3dpo-m3dv.x-panda.workers.dev/s/<random-token>`. Reuse the existing Share/QR workflow and share a read-only snapshot of the current workspace; do not introduce live collaboration or a new file-hosting service.
+This is the single requested feature addition to the otherwise maintenance-focused plan. Proposed URL: `https://ntec3dpo-m3dv.x-panda.workers.dev/s/<random-token>`. Reuse the existing Share/QR workflow. An unchecked checkbox publishes a public model-only address; checking it includes analytics and object/mesh state for a signed-in sharer, with workspace name/expiry inputs. Login uses an eight-hour revocable HttpOnly cookie and existing assigned users. Recipients view and explicitly Save without passwords when admin-controlled public editing is enabled. Keep 20 saved versions per workspace under a 64 MiB history budget, fetch revision lists only when the compact controls expand, load selected versions on demand, and reject stale saves. Preserve explicit Save Workspace and guest recipient updates. Admin credentials are administration-only; the manager assigns sharing-user passwords, changes permissions, and batches user disable/link revocation. No model-file storage, recipient accounts or live collaboration.
 
 ### Feasibility and storage boundary
 
@@ -128,12 +128,13 @@ Flow: share address → Worker validates token/expiry → sanitized workspace JS
 
 | Field | Purpose and handling |
 | --- | --- |
-| `token_hash` | Indexed hash of a cryptographically random 256-bit share token. Return the token only in the generated address; never store the raw token in D1. |
+| `token_hash` | Indexed hash of a cryptographically random 256-bit view token, plus an independent edit-token hash. Store no plaintext tokens. Small encrypted token values allow authorized link recovery; domain-separated authenticated encryption prevents swapping token/source fields. |
 | `source_refs_private` | Validated mapping of opaque asset IDs to encrypted external source URLs and necessary format information. Server-only; not part of client JSON. |
-| `workspace_json` and `schema_version` | Versioned snapshot of annotations, analytic parameters/control points, measurements, object/group metadata, styles and transforms. Client receives only allowlisted fields with opaque asset references. |
+| `workspace_json` and `schema_version` | Versioned snapshot of annotations, analytic parameters/control points, measurements, object/group metadata, styles, transforms and checked per-instance mesh visibility/opacity. Client receives only allowlisted fields with opaque asset references. |
 | `model_identity` | Source model fingerprint/version and coordinate/unit assumptions used to associate planning data with the correct model. |
-| `created_at` and `expires_at` | Server-generated UTC timestamps; expiry is exactly 180 × 24 hours from creation and does not slide when opened. Display the expiry clearly to the user. |
-| `owner_ref` and `revoked_at` | Minimum authorized-creator reference for creation/revocation controls; no new custom user-account system or recipient directory. |
+| `created_at` and `expires_at` | Server-generated UTC timestamps; initial expiry is 180 × 24 hours from creation and does not slide when opened/saved. Admins may change an active expiry only within that original maximum. Display the expiry clearly to the user. |
+| `revision`, `updated_at`, `label` | Bounded management metadata. Admin edits use optimistic locking; explicit recipient saves atomically append distinct history revisions ordered by server save timestamp, including saves from older tabs. |
+| `owner_ref` and `revoked_at` | Minimum authorized-creator reference for creation/revocation controls; sharing-user identifier for audit, without recipient accounts or a recipient directory. |
 
 Use prepared queries and indexes on token hash and expiry. Start with a conservative workspace JSON limit, provisionally 256 KiB, plus limits on text length, object/control-point counts and source references. Confirm the budget against real representative workspaces before implementation. D1's current maximum string/BLOB/row size is 2,000,000 bytes; keep the entire record and bound query payload safely within platform limits rather than treating that maximum as a mobile target. Apply total storage/creation quotas to keep the database small. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
 
@@ -148,7 +149,7 @@ Use prepared queries and indexes on token hash and expiry. Start with a conserva
 
 ### Source protection, access and expiration
 
-1. Authenticate share creation and owner revocation using an approved access mechanism; keep recipient access read-only. Rate-limit creation/download requests and bound resource use. A valid unguessable address is a bearer credential: anyone receiving it can forward it. Recipient identity enforcement would require a separately reviewed authentication requirement.
+1. Separate administration from sharing authorization: only the admin credential manages users, permissions, expiry and revocation; assigned sharing-user credentials publish workspace URLs. Public recipients need no password, and editing can be disabled per workspace. Require revision checks on saves/settings changes, salt/pepper/stretch user passwords, and rate-limit login, creation, saves and downloads. Public links can be forwarded; editor display names are self-reported.
 2. Resolve model requests from the D1 asset map only. Do not accept arbitrary destination URLs in a public query/body. Restrict HTTPS hosts, ports and every redirect hop; reject local/private/link-local targets, embedded credentials and unexpected destinations. Verify source-host authorization and redirect behavior before adding a host. Never forward visitor cookies, authorization headers or arbitrary headers to the source.
 3. Stream with backpressure, byte/time limits and abort propagation; stop upstream work when the client cancels. Forward only safe content/range headers, use generic non-identifying filenames and errors, and do not relay upstream Location, cookies, HTML error pages or diagnostic data that expose the source. Check format-loader behavior so secondary requests or embedded references cannot bypass the protected route. [Worker streaming support](https://developers.cloudflare.com/workers/runtime-apis/streams/)
 4. Check token validity, owner revocation and server-side expiry on every workspace/model/companion request, including HEAD, Range and conditional requests. Use authoritative D1 access checks without a stale authorization cache; fail closed if the database cannot be checked. Do not let SPA fallback, a public asset path or a long-lived signed origin redirect bypass the check.
@@ -172,7 +173,7 @@ Proceed only if the approved host(s) permit reliable server fetches and the sour
 
 The work preserves current intake formats/routes, mesh visibility/highlight/opacity, ghosting/explosion, camera presets/orbit/reset/fullscreen/auto-rotation, rulers/background image/theme, planning tools/groups, clipping/spline/endoscopy, persistence, STL/ZIP/Slicer interchange, snapshots/QR/WhatsApp/native-share fallbacks, diagnostics and PWA behavior.
 
-Improve touch targets, accessible labels, numeric validation, focus and error messages within these existing controls. Do not add screens or unrelated workflows. Optimize list rendering internally if needed without introducing search/filter features. Bound captures and archive exports without new capture modes. Verify the currently advertised offline scope and service-worker updates; do not expand private-model caching.
+Improve touch targets, accessible labels, numeric validation, focus and error messages within these existing controls. The requested protected-workspace manager is the only added screen; do not add unrelated workflows. Optimize list rendering internally if needed without introducing search/filter features. Bound captures and archive exports without new capture modes. Verify the currently advertised offline scope and service-worker updates; do not expand private-model caching.
 
 ## Delivery order and review gates
 
@@ -183,8 +184,8 @@ Improve touch targets, accessible labels, numeric validation, focus and error me
 | 2 — Analytic Tools and Slicer consistency | Debug the per-object workflows and transform/unit/schema issues; produce bidirectional Slicer results and app round-trip coverage. | Known fixtures pass in the viewer and actual Slicer; documented unsupported fields; no unexplained geometry/measurement loss. |
 | 3 — mobile memory/GPU and loading | Unify existing DPR/Safe Mode policy, reduce allocations/idle/UI work and fix cancel/resource ownership. Investigate workers/storage changes only where justified. Produce the oversized-model reduction feasibility report. | Physical-device improvement against baseline with Stages 1–2 still passing. Enable no geometry reduction until its accuracy, notice, memory and workflow gates are reviewed; retain desktop fallback. |
 | 4 — startup and full regression | Defer existing optional code, remove proven unused dependencies and address measured dependency/offline/capture bottlenecks. Keep engine versions/integration compatible. | No feature regressions; complete beta acceptance, then production checks against the deployed commit and assets. |
-| 5 — metadata-only protected sharing | Add the Workstream D read-only snapshot/address flow using a small D1 database and controlled original-host streaming. Store no model copies and reuse existing Share/QR controls. | Prior security/analytic gates pass; source URL remains hidden; no persistent model bytes; expiry/revocation/cleanup and source-failure cases pass in an isolated beta environment. |
+| 5 — metadata-only protected sharing | Add the Workstream D view/edit workspace flow, per-mesh display state and password-protected manager using a small D1 database and controlled original-host streaming. Store no model copies and reuse existing Share/QR controls. | Prior security/analytic gates pass; source URL remains hidden; no persistent model bytes; expiry/revocation/cleanup and source-failure cases pass in an isolated beta environment. |
 
 Keep PRs small and tied to a reproduced defect or measured bottleneck; do not combine all work into a broad rewrite. Establish effort estimates after Stage 0. Use beta previews for each fix, then a reviewed release to main. Build/deploy success and live acceptance are separate gates; retain a known-good release for rollback.
 
-For owner review: confirm the bounded scope, priority of security/data retention and Analytic Tools consistency, the device/Slicer test matrix, the oversized-model decision policy, and Workstream D's metadata-only sharing limits (approved sources, JSON budget, creator access and retention). This document authorizes no implementation or Cloudflare settings change by itself. The next step is review of this revised plan.
+For owner review: confirm the bounded scope, priority of security/data retention and Analytic Tools consistency, the device/Slicer test matrix, the oversized-model decision policy, and Workstream D's metadata-only sharing limits (approved sources, JSON budget, creator access and retention). The isolated test implementation remains subject to the documented acceptance gates. Beta merge and main release need separate owner review; test database rows/keys must not be promoted between environments.
