@@ -24,7 +24,9 @@
     "check:shares:test": "node scripts/share-cloudflare.mjs test check",
     "preview:shares:beta": "node scripts/share-cloudflare.mjs beta preview",
     "deploy:shares:main": "node scripts/share-cloudflare.mjs main deploy",
-    "configure:shares": "node scripts/share-cloudflare.mjs"
+    "configure:shares": "node scripts/share-cloudflare.mjs",
+    "check:shares:beta": "node scripts/share-cloudflare.mjs beta check",
+    "check:shares:beta:cleanup": "node scripts/share-cloudflare.mjs beta cleanup-check"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

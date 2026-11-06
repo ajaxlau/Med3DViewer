@@ -83,3 +83,12 @@ At that initial stage, protected sharing was limited to Dropbox STL with procedu
 - Display Name is relabeled Revision Name. Save with an empty/whitespace name expands the section, shows an inline required-name prompt and focuses the field without issuing a save. Existing saved names and the database format remain compatible.
 - All six main collapsible sections use one 300ms ease-in-out grid/opacity transition. Workspace content remains mounted to animate in both directions and is inert/hidden from assistive technology while retracted. The independent 10-second pointer-leave delay and pin behavior remain unchanged.
 - TypeScript, the low-file-limit Vite/PWA build and 22 workspace API tests passed. Real local Worker/D1/Chromium verified matching computed heading typography, no heading version badge, required Revision Name prompt/focus without a save, and identical computed 300ms easing/properties on all six sections. The existing 10-second/pinning, mobile/desktop, source-concealment and save/restore checks also passed with synthetic geometry. No migration is needed.
+
+
+## PR #12 beta handoff preparation (6 November 2026)
+
+- Restores the existing root Worker name `ntec3dpo-m3dv`; ordinary sharing remains disabled without D1. Test deployment still uses its dedicated generated configuration.
+- Records the owner-confirmed beta D1 UUID `d23f95bc-a6a2-4f43-9fa9-5afaa340f325` in a beta-only profile. Config checks reject known database UUIDs reused across tiers. Beta Preview/cleanup and main publishing reject another source branch; beta publishing explicitly names Preview beta.
+- Beta Preview and scheduled-only cleanup packaging pass without publishing, both with a synthetic UUID override and with the recorded beta profile. Cleanup has no public workers.dev/preview URL, assets or privileged secret. CI now checks both generated beta bundles using a synthetic ID; it does not deploy or migrate a remote database.
+- All 139 direct Node 22 tests and TypeScript passed locally. The four artifact subprocess checks run separately in CI. The phone runbook's fresh-schema SQL was verified in an in-memory SQLite database, including repeated scope insertion, the result `beta|3|4|2|1` and all three migration bookkeeping rows.
+- Remote beta schema, runtime secret names/settings, cleanup scheduling and live acceptance require owner confirmation. Database creation/UUID confirmation is not proof that the schema or runtime binding is ready. PR #12 remains draft pending that handoff; beta/main have not been merged by this preparation.

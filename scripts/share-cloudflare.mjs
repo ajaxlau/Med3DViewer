@@ -4,11 +4,11 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-// Only the dedicated test target has checked-in, non-secret defaults. Beta and
-// main always require their own explicit database settings at promotion time.
+// Owner-confirmed test/beta resource IDs are non-secret and tier-specific.
+// Main has no defaults: production requires a separate, explicit setup.
 export function deploymentSettings(target, env = process.env) {
-  const defaults = target === 'test'
-    ? JSON.parse(readFileSync(new URL('../config/shares.test.json', import.meta.url), 'utf8'))
+  const defaults = ['test', 'beta'].includes(target)
+    ? JSON.parse(readFileSync(new URL(`../config/shares.${target}.json`, import.meta.url), 'utf8'))
     : {};
   return { ...defaults, ...env };
 }
@@ -19,6 +19,12 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
   if (env.SHARES_DB_NAME !== database_name) throw new Error(`Set SHARES_DB_NAME=${database_name} for this target.`);
   if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(env.SHARES_DB_ID || '') || /^0+-/.test(env.SHARES_DB_ID)) {
     throw new Error('Set SHARES_DB_ID to the non-secret database UUID from Cloudflare D1.');
+  }
+  for (const other of ['test', 'beta']) {
+    const knownDatabase = deploymentSettings(other, {}).SHARES_DB_ID;
+    if (target !== other && env.SHARES_DB_ID.toLowerCase() === knownDatabase.toLowerCase()) {
+      throw new Error(`The ${other} database UUID cannot be used for ${target}. Create a separate database.`);
+    }
   }
   if (env.SHARES_RESOURCE_TIER !== target) throw new Error(`Set SHARES_RESOURCE_TIER=${target}; resource tiers cannot be reused implicitly.`);
   /** @type {Record<string, any>} */
@@ -31,8 +37,8 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
     assets: { directory: resolve(root, 'dist'), binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: ['/api/shares', '/api/shares/*', '/s/*'] },
     vars: { SHARES_ENABLED: 'true', SHARES_ENVIRONMENT: target },
     d1_databases: [{ binding: 'SHARES_DB', database_name, database_id: env.SHARES_DB_ID, migrations_dir: resolve(root, 'migrations') }],
-    // Only production Workers receive scheduled events. Preview cleanup is manual
-    // through D1 until scheduled handlers are supported for Worker Previews.
+    // Worker Previews cannot run scheduled events; beta uses a separate,
+    // scheduled-only cleanup Worker with the same beta database binding.
     ...(target === 'beta' ? { previews: {} } : { triggers: { crons: ['17 * * * *'] } }),
     observability: { enabled: false },
   };
@@ -42,26 +48,42 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
   return config;
 }
 
+export function cleanupConfig(env = process.env, root = process.cwd()) {
+  const config = shareConfig('beta', env, root);
+  config.name = 'ntec3dpo-m3dv-sharing-beta-cleanup';
+  config.main = resolve(root, 'worker/cleanup-entry.ts');
+  delete config.assets;
+  delete config.previews;
+  config.workers_dev = false;
+  config.preview_urls = false;
+  config.vars = { SHARES_ENVIRONMENT: 'beta' };
+  config.triggers = { crons: ['17 * * * *'] };
+  return config;
+}
+
+export function requirePublishingBranch(target, action, branch) {
+  if ((target === 'beta' && ['preview', 'cleanup'].includes(action)) || (target === 'main' && action === 'deploy')) {
+    if (branch !== target) throw new Error(`Publish ${target} only from the ${target} branch; current branch is ${branch || 'unknown'}.`);
+  }
+}
+
 async function main() {
   const [target, action = 'configure'] = process.argv.slice(2);
-  if (!['configure', 'check', 'deploy', 'preview', 'migrate', 'cleanup'].includes(action)) throw new Error('Unknown share configuration action.');
-  if (action === 'cleanup' && target !== 'beta') throw new Error('Standalone cleanup is only needed for beta Previews.');
+  if (!['configure', 'check', 'deploy', 'preview', 'migrate', 'cleanup', 'cleanup-check'].includes(action)) throw new Error('Unknown share configuration action.');
+  const cleanup = ['cleanup', 'cleanup-check'].includes(action);
+  if (cleanup && target !== 'beta') throw new Error('Standalone cleanup is only needed for beta Previews.');
   if ((target === 'beta' && action === 'deploy') || (target !== 'beta' && action === 'preview')) throw new Error('Beta uses preview; test/main use deploy.');
-  const config = shareConfig(target, deploymentSettings(target));
-  if (action === 'cleanup') {
-    config.name = 'ntec3dpo-m3dv-sharing-beta-cleanup';
-    config.main = resolve('worker/cleanup-entry.ts');
-    delete config.assets;
-    delete config.previews;
-    config.vars = { SHARES_ENVIRONMENT: 'beta' };
-    config.triggers = { crons: ['17 * * * *'] };
-  }
+  const branch = process.env.WORKERS_CI_BRANCH || process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME
+    || spawnSync('git', ['branch', '--show-current'], { encoding: 'utf8' }).stdout?.trim();
+  requirePublishingBranch(target, action, branch);
+  const settings = deploymentSettings(target);
+  const config = cleanup ? cleanupConfig(settings) : shareConfig(target, settings);
   await mkdir('.share-config', { recursive: true });
-  const path = resolve('.share-config', `${target}${action === 'cleanup' ? '-cleanup' : ''}.json`);
+  const path = resolve('.share-config', `${target}${cleanup ? '-cleanup' : ''}.json`);
   await writeFile(path, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
   if (action === 'configure') { process.stdout.write(`Created .share-config/${target}.json (no secrets).\n`); return; }
   const wrangler = resolve('node_modules/wrangler/bin/wrangler.js');
-  const args = action === 'migrate' ? ['d1', 'migrations', 'apply', 'SHARES_DB', '--remote'] : action === 'preview' ? ['preview'] : ['deploy', ...(action === 'check' ? ['--dry-run'] : [])];
+  const args = action === 'migrate' ? ['d1', 'migrations', 'apply', 'SHARES_DB', '--remote'] : action === 'preview' ? ['preview', '--name', 'beta'] : ['deploy', ...(['check', 'cleanup-check'].includes(action) ? ['--dry-run'] : [])];
   const result = spawnSync(process.execPath, [wrangler, ...args, '--config', path], { stdio: 'inherit' });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;

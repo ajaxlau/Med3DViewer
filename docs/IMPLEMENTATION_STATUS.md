@@ -31,7 +31,7 @@ or unsupported case. This status is not an independent security certification.
 
 ## Evidence recorded
 
-The latest local validation records 135 passing direct Node 22 tests (four artifact subprocess tests run separately in CI), type/build/artifact checks, Worker packaging, five real workerd cases and local Worker/D1/Chromium desktop/mobile checks. Workspace controls sit between Analytics and Project IO in Analytic Tools, with a pin and automatic revision loading; explicit concurrent saves append distinct versions with ordered server timestamps. See [LOCAL_VALIDATION.md](LOCAL_VALIDATION.md) for exact scope and limitations. Cloudflare, physical-device and broader Slicer acceptance remain separate gates; historical release checks are not evidence for this PR.
+The latest local validation records 139 passing direct Node 22 tests (four artifact subprocess tests run separately in CI), type/build/artifact checks, Worker packaging, five real workerd cases and local Worker/D1/Chromium desktop/mobile checks. Workspace controls sit between Analytics and Project IO in Analytic Tools, with a pin and automatic revision loading; explicit concurrent saves append distinct versions with ordered server timestamps. See [LOCAL_VALIDATION.md](LOCAL_VALIDATION.md) for exact scope and limitations. Cloudflare, physical-device and broader Slicer acceptance remain separate gates; historical release checks are not evidence for this PR.
 
 Independent code review identified and requested fixes for uncancelled rejected
 model streams and two shared-load races: a late download replacing a newer manual
@@ -82,3 +82,7 @@ migration/bindings and independent secrets to the test environment; do not point
 preview code at production data. Record live acceptance and obtain owner review
 before beta merge. Promotion to main needs its own approved release and live
 verification; no deployment-provider success alone closes that gate.
+
+## Beta handoff preparation
+
+The owner-confirmed beta database is recorded in a separate profile. Root Worker identity, tier isolation, publishing branch guards and scheduled cleanup packaging are prepared and checked in CI. Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the phone/tablet Cloudflare and GitHub setup. Runtime beta schema/secrets/bindings and owner acceptance remain pending; preparation does not imply a beta merge or production release.

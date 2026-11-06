@@ -4,6 +4,8 @@ This draft adds D1 metadata and a streaming Worker, **not model storage**. Start
 
 The current policy is Dropbox-only, public source-concealing links and a maximum of 180 days from creation. The admin password is administration-only; admins assign individual sharing usernames/passwords. Recipients never need passwords. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for checkbox behavior, saved revision history and the schema-3 upgrade. Protected sharing supports self-contained STL, 3MF and GLB files; local custom meshes cannot be included in shared JSON. Editing, per-mesh state, the admin page and the additive D1 upgrade are covered in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Large-model reduction is still a feasibility gate, not enabled automatically.
 
+For the current PR #12 → beta handoff, use [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md). It records the owner-confirmed beta database, exact Preview settings, migrations, secrets, cleanup and acceptance steps.
+
 ## Resource map
 
 | Target | Database | Scope marker | Deployment |
@@ -18,7 +20,7 @@ Each database gets the same schema, a different UUID, and its own scope row. Bot
 
 ### 1. Create only the test database
 
-Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. The owner-provided test ID `5645e9dd-918f-4bbc-a0d6-9e1c315c27ca` is recorded in [config/shares.test.json](../config/shares.test.json). It is used only by the dedicated test target. Beta/main have no database defaults. Do not send any password/API token in chat.
+Cloudflare dashboard → **Storage & databases → D1 → Create database** (labels can vary). Name it `med3dviewer-shares-test`. Copy its **Database ID**, a UUID. The ID is not a secret and may be shared for configuration checking. The owner-provided test ID `5645e9dd-918f-4bbc-a0d6-9e1c315c27ca` is recorded in [config/shares.test.json](../config/shares.test.json). It is used only by the dedicated test target. The separately confirmed beta ID is recorded in config/shares.beta.json; main has no database defaults. Do not send any password/API token in chat.
 
 For a new database, open its **Console** and execute [0001_shares.sql](../migrations/0001_shares.sql), followed by [0002_editable_workspaces.sql](../migrations/0002_editable_workspaces.sql) and [0003_public_workspace_history.sql](../migrations/0003_public_workspace_history.sql), then run:
 
@@ -59,12 +61,12 @@ Test Worker → Settings → **Variables and Secrets → Add → Secret**. Use y
 
 | Secret | Purpose |
 | --- | --- |
-| `SHARES_CREATE_KEY` | Authorizes creation and revocation; enter this in the app Share dialog only when needed. It is a staff-wide test credential, not per-person login. |
+| `SHARES_CREATE_KEY` | Administration only; enter it at `/admin/shares`. Assign separate sharing-user accounts there. |
 | `SHARES_ENCRYPTION_KEY` | Encrypts private Dropbox source references in D1. Never enter it in the viewer. Losing/changing it makes existing encrypted source records unreadable. |
 
 These are application secrets, **not your Cloudflare API/build token**. Do not use `VITE_*`, GitHub source files, D1 SQL or chat to store/generate them. The Worker derives an encryption key from the random secret; existing 64-character hexadecimal keys are also supported.
 
-Anyone holding the current creator key can revoke any share in that environment. Rotating that key does not create individual accounts; all current key holders have staff-wide authority. Keep the encryption secret stable unless records are deliberately migrated or revoked.
+Anyone holding the current admin key can administer that environment and revoke its shares. Sharing users have separate assigned passwords and do not receive admin rights. Keep the encryption secret stable unless records are deliberately migrated or revoked.
 
 Deploy/save the secret changes. Check the test Worker URL shown by Cloudflare, normally `https://ntec3dpo-m3dv-sharing-test.x-panda.workers.dev`. Open `/api/shares/config` on it. Expected result after schema, binding, scope and both secrets are ready:
 
@@ -94,7 +96,7 @@ This error means bundling exceeded the build machine's file-descriptor limit, fo
 
 ### 4. Test the existing Share workflow
 
-Use a synthetic/de-identified **Dropbox STL, 3MF or GLB**. Load it through the existing URL dialog; wait for ready. Set mesh visibility/opacity, create analytic objects and annotations, transform/group them, then open Share. Enter only `SHARES_CREATE_KEY` and create a protected view link.
+Use a synthetic/de-identified **Dropbox STL, 3MF or GLB**. Load it through the existing URL dialog; wait for ready. Set mesh visibility/opacity and supported analytic/annotation state. Guests can open Share to create a protected model-only link. For a workspace, log in with an assigned sharing-user account, select Share workspace, and enter its name/expiry. Never enter the admin key in the Share dialog.
 
 Open the new `/s/<opaque-token>` address in a fresh browser/device. Confirm meshes, visibility, opacity, annotations and analytic objects restore; copied/QR addresses contain no Dropbox URL. For workspace links, recipients may explicitly Save when public editing is enabled. The sharer uses assigned user credentials; the admin password is not accepted for sharing. Test automatic version selection, explicit Save, concurrent revision allocation and the admin page as described in [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md). Verify refresh, early revocation, mobile orientation, cancellation and source-unavailable behavior using [TESTING.md](TESTING.md).
 
@@ -152,20 +154,19 @@ Initialize the scope via the dashboard SQL above. After building, `npm run check
 
 ## Promotion to beta (requires test review)
 
-1. Create `med3dviewer-shares-beta`, apply the same migration, and initialize `share_environment` with `beta`. Keep test rows in test.
-2. Set the existing Worker's **beta Preview build variables** to this beta database name/UUID and `SHARES_RESOURCE_TIER=beta`; keep `NODE_VERSION=22` and `npm run build:cloudflare`. Use Preview command `npm run preview:shares:beta`. Do not change Production deploy settings.
-3. Generated `.share-config/beta.json` explicitly repeats D1 and runtime variables under `previews`, because Worker Previews do not inherit these top-level bindings. Its top-level D1 declaration exists for migrations only. Verify the active Preview binding before opening a share.
-4. Set separate secrets on the **existing beta Preview**. Base secret changes affect new Previews only. If the phone dashboard does not expose the individual Preview's secret editor, use a trusted terminal rather than pasting secrets in chat:
+Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the owner-confirmed beta database and phone/tablet handoff. The beta profile supplies its non-secret ID/name/tier; do not reuse test resources or put beta settings in Previews Base. Runtime secrets belong only to the existing beta Preview. Publishing beta now requires the actual `beta` source branch, and the command explicitly targets Preview `beta`.
+
+The generated configuration repeats D1 and runtime variables under `previews` because Worker Previews do not inherit top-level resources. Its top-level D1 declaration also supports explicit migrations. The separate scheduled-only cleanup Worker uses this same beta profile, has public URLs disabled and requires no admin/encryption secrets.
+
+If a trusted terminal is needed to set secrets on the existing beta Preview, use its configuration explicitly (the CLI prompts privately):
 
 ```sh
-# First set beta's three non-secret build variables locally and generate config:
 npm run configure:shares -- beta configure
 npx wrangler preview secret put SHARES_CREATE_KEY --name beta --config .share-config/beta.json
 npx wrangler preview secret put SHARES_ENCRYPTION_KEY --name beta --config .share-config/beta.json
 ```
 
-5. Worker Previews do not run Cron Triggers. Deploy a scheduled-only beta cleanup Worker with the beta binding: `node scripts/share-cloudflare.mjs beta cleanup`. It is named `ntec3dpo-m3dv-sharing-beta-cleanup`, has no public cleanup API or creator/encryption secrets, and rejects a non-beta scope. On a phone, create this separate Worker through the GitHub import flow: same repository and reviewed beta branch, build `npm run build:cloudflare`, deploy `node scripts/share-cloudflare.mjs beta cleanup`, and the three **beta** build variables from step 2. No runtime secrets are required for cleanup. Do not skip cleanup and call beta retention complete.
-6. Merge the tested PR into beta only after approval. Run the complete preview acceptance matrix again. Retain the known-good prior deployment for rollback.
+Do not rotate an existing beta encryption secret or enter secrets in chat. Before merge, `npm run check:shares:beta` and `npm run check:shares:beta:cleanup` validate packaging without publishing; GitHub Actions uses a synthetic database UUID for these checks. A successful dry run does not verify remote D1 schema, runtime secrets or the live source download.
 
 ## Promotion to main (separate release approval)
 
