@@ -1,6 +1,6 @@
 # Implementation status for the testing PR
 
-Updated: 5 November 2026. This is a draft implementation for review and isolated
+Updated: 6 November 2026. This is a draft implementation for review and isolated
 preview testing. It has not been approved for merge into beta or main.
 
 The [implementation plan](PERFORMANCE_PLAN.md) remains the requested scope. The
@@ -12,9 +12,9 @@ unit test is not described as complete runtime acceptance.
 
 The front-page login, named/dated workspace publishing and collapsible recipient controls are described in [USER_LOGIN.md](USER_LOGIN.md). They reuse schema 3 and existing sharing accounts.
 
-The test branch supports self-contained Dropbox STL/3MF/GLB sharing with concealed sources, a model-only/workspace checkbox, named saved versions and explicit revision-checked public saves. Admin credentials are administration-only; admins assign sharing users and individual passwords. `/admin/shares` manages users, public editing permission, expiry and batch link revocation. Schema 3 is required for this flow; prior view addresses remain compatible. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for the additive D1 migration and phone setup.
+The test branch supports self-contained Dropbox STL/3MF/GLB sharing with concealed sources, a model-only/workspace checkbox, named saved versions and explicit public saves that append distinct revisions in server save-time order. Admin credentials are administration-only; admins assign sharing users and individual passwords. `/admin/shares` manages users, public editing permission, expiry and batch link revocation. Schema 3 is required for this flow; prior view addresses remain compatible. See [EDITABLE_WORKSPACES.md](EDITABLE_WORKSPACES.md) for the additive D1 migration and phone setup.
 
-Local SQLite-backed tests cover permissions, save races, migration compatibility, pagination and expiry. A real local Worker/D1/Chromium check covers admin login, login-cookie persistence, password-free recipient saves, conflicts, labels, expiry cap, revocation and no persistent credentials. Package tests cover multi-object 3MF, unsafe references/entities and actual expanded-byte limits. Physical-device 3MF rendering/state acceptance and the Slicer gates below remain required.
+Local SQLite-backed tests cover permissions, save races, migration compatibility, pagination and expiry. A real local Worker/D1/Chromium check covers admin login, login-cookie persistence, password-free recipient saves, concurrent revision allocation, labels, expiry cap, revocation and no persistent credentials. Package tests cover multi-object 3MF, unsafe references/entities and actual expanded-byte limits. Physical-device 3MF rendering/state acceptance and the Slicer gates below remain required.
 
 ## Scope represented in this PR
 
@@ -31,7 +31,7 @@ or unsupported case. This status is not an independent security certification.
 
 ## Evidence recorded
 
-The current local validation records 70 actual Node 22 test cases, type/build/artifact checks, Worker packaging and local workerd/D1 HTTP checks. See [LOCAL_VALIDATION.md](LOCAL_VALIDATION.md) for exact scope and limitations. Cloudflare, physical-device and broader Slicer acceptance remain separate gates; historical release checks are not evidence for this PR.
+The latest local validation records 135 passing direct Node 22 tests (four artifact subprocess tests run separately in CI), type/build/artifact checks, Worker packaging, five real workerd cases and local Worker/D1/Chromium desktop/mobile checks. Workspace controls use the left drawer with a header icon and automatic revision loading; explicit concurrent saves append distinct versions with ordered server timestamps. See [LOCAL_VALIDATION.md](LOCAL_VALIDATION.md) for exact scope and limitations. Cloudflare, physical-device and broader Slicer acceptance remain separate gates; historical release checks are not evidence for this PR.
 
 Independent code review identified and requested fixes for uncancelled rejected
 model streams and two shared-load races: a late download replacing a newer manual

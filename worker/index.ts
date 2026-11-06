@@ -4,14 +4,15 @@ import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, modelShareKey, 
 import { cleanupExpiredShares, databaseScopeMatches } from './cleanup';
 
 // Local interfaces keep the browser's dependency graph free of Workers SDKs.
+interface D1Result { meta?: { changes?: number }; results?: unknown[] }
 export interface D1Statement {
   bind(...values: unknown[]): D1Statement;
   first<T = Record<string, unknown>>(): Promise<T | null>;
-  run(): Promise<{ meta?: { changes?: number } }>;
+  run(): Promise<D1Result>;
 }
 export interface ShareDatabase {
   prepare(sql: string): D1Statement;
-  batch(statements: D1Statement[]): Promise<{ meta?: { changes?: number } }[]>;
+  batch(statements: D1Statement[]): Promise<D1Result[]>;
 }
 export interface ShareEnvironment {
   ASSETS?: { fetch(request: Request): Promise<Response> };
@@ -489,38 +490,47 @@ async function saveHistory(request: Request, record: ShareRecord, env: ShareEnvi
   if(!record.include_workspace || !record.editing_enabled)throw new ShareError(403,'VIEW_ONLY','Editing is disabled for this public workspace.');
   await limitedAttempts(request,env,now,`save:${record.token_hash}`,30);
   const body=await readJson(request) as any;requestFields(body,['workspace','modelIdentity','revision','author']);
-  const expected=revision(body.revision),author=revisionAuthor(body.author);
-  if(expected!==record.revision)throw new ShareError(409,'WORKSPACE_CONFLICT','This workspace changed. Review the latest saved version before saving.');
+  revision(body.revision); // The client's base may be old: each explicit save appends its own snapshot.
+  const author=revisionAuthor(body.author);
   if(!author)throw new ShareError(400,'AUTHOR_INVALID','Enter a display name of 1–80 characters.');
   if(body.modelIdentity!==record.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity changed. Reload before saving.');
   let snapshot:string;
   try{snapshot=JSON.stringify(validateSharedWorkspace(body.workspace));}catch{throw new ShareError(400,'INVALID_WORKSPACE','The workspace contains unsupported model/planning state.');}
-  const bytes=encoder.encode(snapshot).length,saveId=randomToken(),next=(record.workspace_version||1)+1;
-  const valid=`EXISTS(SELECT 1 FROM shares s WHERE s.token_hash=? AND s.revision=? AND s.editing_enabled=1 AND s.expires_at>? AND s.revoked_at IS NULL)`;
-  const args=[record.token_hash,expected,now];
-  // Snapshot insertion, CAS update and pruning commit as one D1 transaction.
+  const bytes=encoder.encode(snapshot).length,saveId=randomToken();
+  const valid=`token_hash=? AND include_workspace=1 AND editing_enabled=1 AND auth_epoch=? AND model_identity=? AND expires_at>? AND revoked_at IS NULL`;
+  const args=[record.token_hash,record.auth_epoch,record.model_identity,now];
+  // D1 serializes this entire batch. Allocate from the current row inside the
+  // transaction, never from the recipient's potentially stale revision number.
+  // A monotonic server timestamp also orders saves that arrive in the same ms.
   const results=await env.SHARES_DB!.batch([
     env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id)
       SELECT token_hash,workspace_version,workspace_json,length(CAST(workspace_json AS BLOB)),'Previous saved state',COALESCE(updated_at,created_at),'baseline'
-      FROM shares WHERE token_hash=? AND NOT EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=?) AND ${valid}
+      FROM shares WHERE ${valid} AND NOT EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=?)
       AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+length(CAST(workspace_json AS BLOB))+?<=?`)
-      .bind(record.token_hash,record.token_hash,...args,bytes,HISTORY_BYTE_LIMIT),
+      .bind(...args,record.token_hash,bytes,HISTORY_BYTE_LIMIT),
     env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id)
-      SELECT ?,?,?,?,?,?,? WHERE ${valid} AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND version=?)
+      SELECT token_hash,workspace_version+1,?,?,?,MAX(?,COALESCE(updated_at,created_at)+1),? FROM shares WHERE ${valid}
+      AND EXISTS(SELECT 1 FROM share_revisions h WHERE h.token_hash=shares.token_hash AND h.version=shares.workspace_version)
       AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+?<=?`)
-      .bind(record.token_hash,next,snapshot,bytes,author,now,saveId,...args,record.token_hash,next-1,bytes,HISTORY_BYTE_LIMIT),
-    env.SHARES_DB!.prepare(`UPDATE shares SET workspace_json=?,workspace_version=?,revision=revision+1,updated_at=?
-      WHERE token_hash=? AND revision=? AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`)
-      .bind(snapshot,next,now,record.token_hash,expected,record.token_hash,saveId),
-    env.SHARES_DB!.prepare(`DELETE FROM share_revisions WHERE token_hash=? AND version<=?
-      AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`).bind(record.token_hash,next-HISTORY_VERSION_LIMIT,record.token_hash,saveId),
+      .bind(snapshot,bytes,author,now,saveId,...args,bytes,HISTORY_BYTE_LIMIT),
+    env.SHARES_DB!.prepare(`UPDATE shares SET workspace_json=?,workspace_version=workspace_version+1,revision=revision+1,
+      updated_at=(SELECT saved_at FROM share_revisions WHERE token_hash=? AND save_id=?)
+      WHERE ${valid} AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)
+      RETURNING revision,workspace_version,updated_at,expires_at`)
+      .bind(snapshot,record.token_hash,saveId,...args,record.token_hash,saveId),
+    env.SHARES_DB!.prepare(`DELETE FROM share_revisions WHERE token_hash=? AND version<=(SELECT workspace_version FROM shares WHERE token_hash=?)-?
+      AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`).bind(record.token_hash,record.token_hash,HISTORY_VERSION_LIMIT,record.token_hash,saveId),
   ]);
   if(!results[2]?.meta?.changes) {
     const current=await adminRecord(record.token_hash,env,now);
-    if(current.revision!==expected)throw new ShareError(409,'WORKSPACE_CONFLICT','This workspace changed. Review the latest saved version before saving.');
+    if(!current.editing_enabled || current.auth_epoch!==record.auth_epoch)throw new ShareError(403,'VIEW_ONLY','Workspace permissions changed. Reload before saving.');
+    if(current.model_identity!==record.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity changed. Reload before saving.');
     throw new ShareError(507,'HISTORY_FULL','Workspace history storage is full. Contact the administrator. Your changes are still on this device.');
   }
-  return json({revision:expected+1,workspaceVersion:next,updatedAt:new Date(now).toISOString(),expiresAt:new Date(record.expires_at).toISOString()});
+  // RETURNING captures this save's allocation before another batch can advance
+  // the current row or prune it. A follow-up SELECT could report a different save.
+  const saved=results[2].results?.[0] as {revision:number;workspace_version:number;updated_at:number;expires_at:number};
+  return json({revision:saved.revision,workspaceVersion:saved.workspace_version,updatedAt:new Date(saved.updated_at).toISOString(),expiresAt:new Date(saved.expires_at).toISOString()});
 }
 async function revisionHistory(record: ShareRecord, env: ShareEnvironment, version?: number): Promise<Response> {
   if(!record.include_workspace)throw new ShareError(404,'HISTORY_UNAVAILABLE','Model-only links have no workspace history.');
@@ -531,11 +541,16 @@ async function revisionHistory(record: ShareRecord, env: ShareEnvironment, versi
     if(!snapshot)throw new ShareError(404,'REVISION_UNAVAILABLE','This version is unavailable or has been removed from history.');
     return json({version,workspace:validateSharedWorkspace(JSON.parse(snapshot)),modelIdentity:record.model_identity,revision:record.revision,currentVersion,author:row?.author||'Original workspace',savedAt:row?.saved_at||record.updated_at||record.created_at});
   }
-  const result=await env.SHARES_DB!.prepare(`SELECT json_group_array(json_object('version',version,'author',author,'savedAt',saved_at)) AS items
-    FROM (SELECT version,author,saved_at FROM share_revisions WHERE token_hash=? ORDER BY version DESC LIMIT 20)`).bind(record.token_hash).first<{items:string}>();
+  // Read the history and its current counters in one SQLite snapshot. A save
+  // may have committed since loadRecord(), so its counters can already be old.
+  const result=await env.SHARES_DB!.prepare(`SELECT workspace_version,revision,updated_at,created_at,
+    (SELECT json_group_array(json_object('version',version,'author',author,'savedAt',saved_at))
+      FROM (SELECT version,author,saved_at FROM share_revisions WHERE token_hash=s.token_hash ORDER BY version DESC LIMIT 20)) AS items
+    FROM shares s WHERE token_hash=? AND revoked_at IS NULL`).bind(record.token_hash).first<{items:string;workspace_version:number;revision:number;updated_at:number;created_at:number}>();
+  if(!result)throw new ShareError(404,'SHARE_UNAVAILABLE','This share is unavailable or has expired.');
   const items=JSON.parse(result?.items||'[]');
-  if(!items.length)items.push({version:currentVersion,author:'Original workspace',savedAt:record.updated_at||record.created_at});
-  return json({items,currentVersion,revision:record.revision,maxVersions:HISTORY_VERSION_LIMIT});
+  if(!items.length)items.push({version:result.workspace_version,author:'Original workspace',savedAt:result.updated_at||result.created_at});
+  return json({items,currentVersion:result.workspace_version,revision:result.revision,maxVersions:HISTORY_VERSION_LIMIT});
 }
 function safeModelHeaders(upstream: Response, ext: string): Headers {
   const headers = new Headers(protectedHeaders);

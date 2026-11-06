@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, RotateCw } from 'lucide-react';
 import { listWorkspaceHistory, loadWorkspaceVersion, saveProtectedWorkspace, type WorkspaceHistoryItem } from '../lib/sharedWorkspace';
 import type { ViewerManager } from '../lib/ViewerManager';
 
@@ -15,14 +16,15 @@ export interface SharedWorkspaceSession {
   workspaceVersion?: number;
   workspaceName?: string;
 }
-export function SharedWorkspaceBar({ session, manager, onSaved }: {
+export function SharedWorkspaceBar({ session, manager, onSaved, openRequest = 0 }: {
   session: SharedWorkspaceSession;
   manager: ViewerManager;
   onSaved: (revision: number, expiresAt: string) => void;
+  openRequest?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<'save' | 'load' | 'refresh' | null>(null);
   const [author, setAuthor] = useState('');
   const [items, setItems] = useState<WorkspaceHistoryItem[]>([]);
   const [selected, setSelected] = useState(session.workspaceVersion || 1);
@@ -33,85 +35,99 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
   const detailsId = useId();
   const modelMatches = () => manager.modelLoadState.requestId === session.requestId && manager.modelLoadState.phase === 'ready' && manager.loadedModelIdentity === session.modelIdentity;
   useEffect(() => {
-    setAuthor(''); setItems([]); setExpanded(false); setBusy(false); setStatus(''); setFocusAuthor(false);
+    setAuthor(''); setItems([]); setExpanded(false); setOperation(null); setStatus(''); setFocusAuthor(false);
     setViewing(session.workspaceVersion || 1); setSelected(session.workspaceVersion || 1);
-    return () => request.current?.abort();
+    return () => { request.current?.abort(); request.current = null; };
   }, [session.token, session.requestId]);
+  useEffect(() => { if (openRequest) setExpanded(true); }, [openRequest]);
   useEffect(() => {
-    if (expanded && focusAuthor && !busy) { authorInput.current?.focus(); setFocusAuthor(false); }
-  }, [expanded, focusAuthor, busy]);
-  const run = async (operation: (signal: AbortSignal) => Promise<void>) => {
-    if (busy) return;
-    const controller = new AbortController(); request.current = controller; setBusy(true); setStatus('');
-    try { await operation(controller.signal); }
-    catch (reason) { if (!controller.signal.aborted) setStatus(reason instanceof Error ? reason.message : 'Workspace request failed.'); }
-    finally { if (!controller.signal.aborted) setBusy(false); }
+    if (expanded && focusAuthor && !operation) { authorInput.current?.focus(); setFocusAuthor(false); }
+  }, [expanded, focusAuthor, operation]);
+  const run = async (kind: NonNullable<typeof operation>, action: (signal: AbortSignal) => Promise<void>, supersede = false) => {
+    if (request.current && !supersede) return;
+    request.current?.abort();
+    const controller = new AbortController(); request.current = controller; setOperation(kind); setStatus('');
+    try { await action(controller.signal); }
+    catch (reason) {
+      if (!controller.signal.aborted && request.current === controller) {
+        setSelected(viewing);
+        setStatus(reason instanceof Error ? reason.message : 'Workspace request failed.');
+      }
+    }
+    finally { if (request.current === controller) { request.current = null; setOperation(null); } }
   };
-  const refresh = () => run(async signal => {
+  const refresh = () => run('refresh', async signal => {
     const history = await listWorkspaceHistory(session.token, signal);
     if (!signal.aborted && modelMatches()) setItems(history.items);
   });
   useEffect(() => {
-    if (expanded && session.historyEnabled && !items.length && !busy) void refresh();
+    if (expanded && session.historyEnabled && !items.length && !request.current) void refresh();
   }, [expanded, session.token]);
+  const switchRevision = (version: number) => {
+    if (operation === 'save' || !Number.isSafeInteger(version)) return;
+    setSelected(version);
+    void run('load', async signal => {
+      const data = await loadWorkspaceVersion(session.token, version, session.modelIdentity, signal);
+      if (signal.aborted || !modelMatches()) return;
+      await manager.restoreShareWorkspace(data.workspace);
+      if (signal.aborted || !modelMatches()) return;
+      setViewing(version); onSaved(data.revision, session.expiresAt);
+    }, true);
+  };
   if (!modelMatches()) return null;
   const expired = Date.parse(session.expiresAt) <= Date.now();
   const canSave = session.historyEnabled ? session.editingEnabled : session.role === 'edit';
-  const button = 'min-h-11 rounded border border-blue-400 px-3 text-sm disabled:opacity-50';
-  if (session.includeWorkspace === false) return <p className="bg-blue-50 px-4 py-2 text-xs text-blue-950 dark:bg-blue-950/40 dark:text-blue-200">Public model · expires {new Date(session.expiresAt).toLocaleDateString()}</p>;
-  return <section aria-label="Workspace controls" className="max-h-[40dvh] overflow-y-auto bg-blue-50 px-3 py-1 text-sm text-blue-950 dark:bg-blue-950/40 dark:text-blue-200">
-    <div className="flex min-h-11 flex-wrap items-center justify-between gap-2">
+  const field = 'mt-1 block min-h-11 w-full min-w-0 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100';
+  if (session.includeWorkspace === false) return null;
+  return <section aria-label="Workspace controls" className="border-b border-zinc-200 bg-zinc-50 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100">
+    <div>
       <button type="button" aria-label={`Workspace revisions: ${session.workspaceName || 'Workspace'}, revision ${session.historyEnabled ? viewing : session.revision}`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => {
         setExpanded(!expanded);
-      }} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left" title="Workspace revisions and details">
-        <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
-        <span className="min-w-0 truncate" title={session.workspaceName || 'Workspace'}>{session.workspaceName || 'Workspace'}</span>
-        <span className="shrink-0 text-xs">v{session.historyEnabled ? viewing : session.revision}</span>
-        {expired ? <span className="text-xs">Expired</span> : !canSave && <span className="whitespace-nowrap text-xs">View only</span>}
+      }} className="flex min-h-11 w-full min-w-0 items-center gap-2 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 transition-colors hover:bg-zinc-100/70 dark:text-zinc-300 dark:hover:bg-zinc-800/60" title="Workspace revisions">
+        <span className="min-w-0 flex-1 truncate" title={session.workspaceName || 'Workspace'}>{session.workspaceName || 'Workspace'}</span>
+        <span className="shrink-0 text-[10px]">v{session.historyEnabled ? viewing : session.revision}</span>
+        {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
       </button>
-      {canSave && <button disabled={busy || expired} className={`${button} bg-blue-600 font-semibold text-white`} onClick={() => {
+    </div>
+    {expanded && <div id={detailsId} className="space-y-3 px-4 pb-3">
+      {session.historyEnabled && session.includeWorkspace && <>
+        <div className="flex items-end gap-1">
+          <label className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Workspace Revision<select aria-label="Workspace Revision" disabled={operation === 'save' || expired || !items.length} className={field} value={selected} onChange={event => switchRevision(Number(event.target.value))}>
+            {!items.length && <option value={selected}>{operation ? 'Loading…' : `Revision ${viewing}`}</option>}
+            {items.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.author} · {new Date(item.savedAt).toLocaleString()}</option>)}
+          </select></label>
+          <button aria-label="Refresh revisions" title="Refresh revisions" className="flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-blue-400" disabled={!!operation || expired} onClick={() => void refresh()}><RotateCw size={15} /></button>
+        </div>
+        {canSave && <label className="block text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Display name<input ref={authorInput} aria-label="Revision display name" maxLength={80} value={author} onChange={event => setAuthor(event.target.value)} className={field}/></label>}
+      </>}
+    </div>}
+    <div className="px-4 pb-3">
+      {canSave && <button disabled={!!operation || expired} className="min-h-11 w-full rounded bg-blue-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50" onClick={() => {
         if (session.historyEnabled && !author.trim()) {
-          setExpanded(true); setFocusAuthor(true); setStatus('Enter a display name, then Save Workspace.');
+          setExpanded(true); setFocusAuthor(true);
           return;
         }
-        void run(async signal => {
+        void run('save', async signal => {
           if (!modelMatches()) throw new Error('A different model is open. Reload this workspace before saving.');
           const result = await saveProtectedWorkspace(session.token, { workspace: manager.exportShareWorkspace(), modelIdentity: session.modelIdentity, revision: session.revision, ...(session.historyEnabled ? { author } : {}) }, signal);
           if (signal.aborted || !modelMatches()) return;
           onSaved(result.revision, result.expiresAt);
-          if (result.workspaceVersion) { setViewing(result.workspaceVersion); setSelected(result.workspaceVersion); }
+          if (result.workspaceVersion) {
+            setViewing(result.workspaceVersion); setSelected(result.workspaceVersion);
+            setItems(previous=>[{version:result.workspaceVersion!,author:author.trim(),savedAt:Date.parse(result.updatedAt)},...previous.filter(item=>item.version!==result.workspaceVersion)].slice(0,20));
+          }
           setStatus(`Saved${result.workspaceVersion ? ` as revision ${result.workspaceVersion}` : ''}.`);
           if (session.historyEnabled) {
-            const history = await listWorkspaceHistory(session.token, signal);
-            if (!signal.aborted && modelMatches()) setItems(history.items);
+            try {
+              const history = await listWorkspaceHistory(session.token, signal);
+              if (!signal.aborted && modelMatches()) setItems(history.items);
+            } catch { /* The save succeeded; Refresh can retry history without duplicating it. */ }
           }
         });
-      }}>{busy ? 'Working…' : 'Save Workspace'}</button>}
+      }}>{operation === 'save' ? 'Saving…' : 'Save Workspace'}</button>}
+      {expired ? <p className="pt-2 text-xs text-zinc-500">Workspace unavailable.</p> : !canSave && <p className="text-xs text-zinc-500">View only</p>}
+      {operation === 'load' && <p role="status" className="pt-2 text-xs text-zinc-500">Loading revision…</p>}
+      {status && <p role="status" className="pt-2 text-xs text-zinc-500 dark:text-zinc-400">{status}</p>}
     </div>
-    {expanded && <div id={detailsId} className="space-y-2 border-t border-blue-200 py-2 dark:border-blue-900">
-      {session.historyEnabled && session.includeWorkspace && <>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="min-w-0 flex-1">Workspace Revision<select aria-label="Workspace Revision" disabled={busy || !items.length} className="mt-1 block min-h-11 w-full max-w-full rounded border bg-white px-2 text-zinc-900" value={selected} onChange={event => setSelected(Number(event.target.value))}>
-            {!items.length && <option value={selected}>{busy ? 'Loading…' : `Revision ${viewing}`}</option>}
-            {items.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.author} · {new Date(item.savedAt).toLocaleString()}</option>)}
-          </select></label>
-          <button className={button} disabled={busy || expired || !items.length} onClick={() => {
-            if (!window.confirm('Load this revision? Unsaved changes will be replaced.')) return;
-            void run(async signal => {
-              const data = await loadWorkspaceVersion(session.token, selected, session.modelIdentity, signal);
-              if (signal.aborted || !modelMatches()) return;
-              await manager.restoreShareWorkspace(data.workspace);
-              if (signal.aborted || !modelMatches()) return;
-              setViewing(selected); onSaved(data.revision, session.expiresAt); setStatus(`Viewing revision ${selected}. Save creates a new revision.`);
-            });
-          }}>Load revision</button>
-          <button className={button} disabled={busy || expired} onClick={() => void refresh()}>Refresh</button>
-        </div>
-        {canSave && <label className="block">Display name<input ref={authorInput} aria-label="Revision display name" maxLength={80} value={author} onChange={event => setAuthor(event.target.value)} className="ml-2 min-h-11 max-w-full rounded border bg-white px-2 text-zinc-900"/></label>}
-      </>}
-      <p className="text-xs">Expires {new Date(session.expiresAt).toLocaleString()}. {canSave ? 'Changes are saved only when you click Save Workspace.' : 'Editing is disabled by the administrator.'}</p>
-      {session.historyEnabled && <p className="text-xs">Latest 20 revisions retained. Display names are self-reported.</p>}
-    </div>}
-    {status && <p role="status" className="py-1 text-xs">{status}</p>}
   </section>;
 }

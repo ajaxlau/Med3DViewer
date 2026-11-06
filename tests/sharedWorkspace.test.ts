@@ -216,3 +216,19 @@ test('workspace saves include a revision and model identity and surface conflict
   await assert.rejects(saveProtectedWorkspace(token,{workspace,modelIdentity:'b'.repeat(64),revision:1},new AbortController().signal),/WORKSPACE_CONFLICT/);
   assert.equal(calls,1);
 });
+test('history saves accept the server allocated revision for an older client without retrying',async t=>{
+  let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>{
+    calls++;return new Response(JSON.stringify({revision:8,workspaceVersion:6,updatedAt:'2026-11-06T02:00:00.001Z',expiresAt:'2027-01-01T00:00:00Z'}));
+  });
+  const result=await saveProtectedWorkspace(token,{workspace,modelIdentity:'b'.repeat(64),revision:1,author:'Recipient'},new AbortController().signal);
+  assert.equal(result.workspaceVersion,6);assert.equal(result.revision,8);assert.equal(calls,1);
+});
+test('save responses reject malformed history versions and retain legacy revision checks',async t=>{
+  let payload:any;
+  t.mock.method(globalThis,'fetch',async()=>new Response(JSON.stringify(payload)));
+  for(const invalid of [{workspaceVersion:1},{workspaceVersion:2.5},{revision:0,workspaceVersion:3},{workspaceVersion:null},{}]){
+    payload={revision:8,updatedAt:'2026-11-06T02:00:00Z',expiresAt:'2027-01-01T00:00:00Z',...invalid};
+    await assert.rejects(saveProtectedWorkspace(token,{workspace,modelIdentity:'b'.repeat(64),revision:1},new AbortController().signal),/invalid revision metadata/);
+  }
+});

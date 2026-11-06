@@ -236,7 +236,10 @@ export async function saveProtectedWorkspace(token: string, data: {workspace:unk
   const response = await fetch(`/api/shares/${token}`,{method:'PUT',credentials:'omit',cache:'no-store',redirect:'error',signal,headers:{'Content-Type':'application/json',...(editSession?{Authorization:`Bearer ${editSession}`}:{})},body:JSON.stringify({...data,workspace})});
   if (!response.ok) throw await shareDownloadError(response,signal);
   const result = JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,8192,signal)));
-  if (result.revision !== data.revision+1 || !Number.isFinite(Date.parse(result.updatedAt)) || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('The save service returned invalid revision metadata. Reload before saving again.');
+  const appendSave = result.workspaceVersion !== undefined;
+  if (!Number.isSafeInteger(result.revision) || result.revision < 1
+    || (appendSave ? !Number.isSafeInteger(result.workspaceVersion) || result.workspaceVersion < 2 : result.revision !== data.revision+1)
+    || !Number.isFinite(Date.parse(result.updatedAt)) || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('The save service returned invalid revision metadata. Reload before saving again.');
   return result;
 }
 

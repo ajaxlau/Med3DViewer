@@ -4,8 +4,9 @@ import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy
 import { ModelStatusCard } from './ModelStatusCard';
 import { Tooltip } from './Tooltip';
 import { shouldIgnoreHover } from '../lib/utils';
+import type { ReactNode } from 'react';
 
-export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: () => void }) {
+export function Sidebar({ collapsed, onClose, workspaceControls }: { collapsed: boolean, onClose?: () => void, workspaceControls?: ReactNode }) {
   const { 
     status, loadingProgress, filename, meshes, globalOpacity, setGlobalOpacity, 
     toggleMeshVisibility, toggleAllMeshesVisibility, invertMeshesVisibility, setMeshOpacity, highlightMesh, highlightedMeshId,
@@ -106,6 +107,9 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
 
   return (
     <aside 
+      aria-label="Visualization Tools"
+      aria-hidden={collapsed}
+      inert={collapsed}
       onMouseLeave={(e) => {
         if (shouldIgnoreHover()) return;
         if (e.buttons === 0) {
@@ -117,18 +121,21 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
       }}
       className={`transition-all duration-300 bg-zinc-50 dark:bg-zinc-900 flex-col overflow-y-auto overflow-x-hidden shrink-0 ${collapsed ? 'w-full md:w-0 h-0 md:h-auto opacity-0 border-none pointer-events-none' : 'w-full md:w-[280px] h-auto max-h-[50vh] md:max-h-none md:h-auto border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 flex'}`}
     >
-      {!collapsed && <div className="flex flex-col w-full min-h-min pb-5">
+      <div className="flex flex-col w-full min-h-min pb-5">
         
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+        {!collapsed && <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
           <h3 className="font-bold text-sm text-zinc-800 dark:text-zinc-100 uppercase tracking-widest flex items-center gap-2">
             Visualization Tools
           </h3>
           {onClose && (
-            <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={onClose}>
+            <button aria-label="Close visualization tools" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" onClick={onClose}>
               <X size={16} />
             </button>
           )}
-        </div>
+        </div>}
+
+        {workspaceControls}
+        {!collapsed && <>
 
         {/* Section: Mesh Visibility */}
         <div 
@@ -813,7 +820,8 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
         <div className="p-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
           <ModelStatusCard />
         </div>
-      </div>}
+        </>}
+      </div>
     </aside>
   );
 }

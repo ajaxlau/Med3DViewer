@@ -22,6 +22,7 @@ declare global {
 function MainLayout() {
   const { viewerManager, activeModal, isEmpty, modelLoadState } = useViewer();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [workspaceOpenRequest, setWorkspaceOpenRequest] = useState(0);
   const [sharedNotice, setSharedNotice] = useState<{ loading: boolean; error?: boolean; text: string } | null>(null);
   const sharedAbortRef = useRef<AbortController | null>(null);
   const [sharedSession,setSharedSession]=useState<SharedWorkspaceSession|null>(null);
@@ -187,11 +188,10 @@ function MainLayout() {
       <div className="flex flex-col flex-1 min-h-0">
         <Header 
           toggleSidebar={toggleSidebar}
+          onOpenWorkspace={sharedSession&&sharedSession.includeWorkspace!==false?()=>{
+            setSidebarCollapsed(false); setWorkspaceOpenRequest(value=>value+1);
+          }:undefined}
         />
-        {sharedSession&&viewerManager&&<SharedWorkspaceBar session={sharedSession} manager={viewerManager} onSaved={(revision,expiresAt)=>{
-          setSharedSession(previous=>previous&&previous.token===sharedSession.token?{...previous,revision,expiresAt}:previous);
-          viewerManager.sharedWorkspaceExpiresAt=expiresAt;
-        }} />}
         {sharedNotice && (
           <div role={sharedNotice.error ? 'alert' : 'status'} className={`px-4 py-2 text-xs flex items-center justify-between gap-3 ${sharedNotice.error ? 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200'}`}>
             <span>{sharedNotice.text}</span>
@@ -199,7 +199,10 @@ function MainLayout() {
           </div>
         )}
         <div className="flex flex-1 min-h-0 relative flex-col md:flex-row overflow-hidden">
-          <Sidebar collapsed={sidebarCollapsed} onClose={() => {
+          <Sidebar collapsed={sidebarCollapsed} workspaceControls={sharedSession&&viewerManager&&<SharedWorkspaceBar session={sharedSession} manager={viewerManager} openRequest={workspaceOpenRequest} onSaved={(revision,expiresAt)=>{
+            setSharedSession(previous=>previous&&previous.token===sharedSession.token?{...previous,revision,expiresAt}:previous);
+            viewerManager.sharedWorkspaceExpiresAt=expiresAt;
+          }} />} onClose={() => {
             setSidebarCollapsed(true);
             setTimeout(() => {
               if (viewerManager && viewerManager.viewer) viewerManager.viewer.Resize();

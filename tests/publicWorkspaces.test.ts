@@ -13,7 +13,11 @@ class Database {
     for(const name of ['0001_shares','0002_editable_workspaces',...(history?['0003_public_workspace_history']:[])])this.db.exec(readFileSync(new URL(`../migrations/${name}.sql`,import.meta.url),'utf8'));
     this.db.exec("INSERT INTO share_environment(scope) VALUES('test')");
   }
-  prepare(sql:string):D1Statement {const db=this.db;let args:any[]=[];return {bind(...values:any[]){args=values;return this;},async first<T>(){return (db.prepare(sql).get(...args)||null) as T|null;},async run(){return {meta:{changes:Number(db.prepare(sql).run(...args).changes)}};}};}
+  prepare(sql:string):D1Statement {const db=this.db;let args:any[]=[];return {bind(...values:any[]){args=values;return this;},async first<T>(){return (db.prepare(sql).get(...args)||null) as T|null;},async run(){
+    const statement=db.prepare(sql);
+    if(/\bRETURNING\b/i.test(sql)){const results=statement.all(...args);return {results,meta:{changes:Number((db.prepare('SELECT changes() AS n').get() as any).n)}};}
+    return {meta:{changes:Number(statement.run(...args).changes)}};
+  }};}
   // D1 serializes transactions. Execute our synchronous SQLite statements before yielding.
   pending:Promise<unknown>=Promise.resolve();
   async batch(statements:D1Statement[]){const next=this.pending.then(async()=>{this.db.exec('BEGIN');try{const result=[];for(const statement of statements)result.push(await statement.run());this.db.exec('COMMIT');return result;}catch(reason){this.db.exec('ROLLBACK');throw reason;}});this.pending=next.catch(()=>{});return next;}
@@ -87,13 +91,12 @@ test('schema 3 preserves existing sources and public links while requiring expli
     assert.equal((await (await worker.fetch(request(`/api/shares/${share.token}/revisions`),env)).json() as any).items.length,2);
   }finally{env.SHARES_DB.db.close();}
 });
-test('explicit saves preserve author, analytic/mesh snapshots and conflict-safe versions under one URL',async()=>{
+test('explicit saves append author and analytic/mesh snapshots even from an older base revision',async()=>{
   const {env,worker}=setup();try{
     const share=await create(worker,env),path=`/api/shares/${share.token}`;
     assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM share_revisions').get() as any).n,0,'opening must not save');
     const result=await worker.fetch(save(share.token,1,'Editor One',true),env);assert.equal(result.status,200,await result.clone().text());assert.equal((await result.json() as any).workspaceVersion,2);
-    assert.equal((await worker.fetch(save(share.token,1,'Stale Editor'),env)).status,409);
-    const second=await worker.fetch(save(share.token,2,'Editor Two'),env);assert.equal(second.status,200);
+    const second=await worker.fetch(save(share.token,1,'Editor Two'),env);assert.equal(second.status,200);
     const history=await (await worker.fetch(request(path+'/revisions'),env)).json() as any;
     assert.deepEqual(history.items.map((row:any)=>[row.version,row.author]),[[3,'Editor Two'],[2,'Editor One'],[1,'Previous saved state']]);
     const old=await (await worker.fetch(request(path+'/revisions/2'),env)).json() as any;assert.deepEqual(old.workspace,workspace(true));assert.equal(old.revision,3);
@@ -165,12 +168,62 @@ test('public creation and sharing-password guessing are rate limited before expe
   }finally{env.SHARES_DB.db.close();}
 });
 
-test('concurrent public saves produce one saved version and one conflict',async()=>{
-  const {env,worker}=setup();try{
+test('concurrent public saves each receive their own version and monotonic server timestamp',async()=>{
+  const {env}=setup(),now=Date.now(),worker=createShareWorker({now:()=>now});try{
     const share=await create(worker,env);
-    const responses=await Promise.all([worker.fetch(save(share.token,1,'First editor',true),env),worker.fetch(save(share.token,1,'Second editor'),env)]);
-    assert.deepEqual(responses.map(response=>response.status).sort(),[200,409]);
-    assert.equal((env.SHARES_DB.db.prepare('SELECT count(*) AS n FROM share_revisions').get() as any).n,2);
+    const responses=await Promise.all(Array.from({length:4},(_,index)=>{
+      const snapshot=workspace();snapshot.meshes[0].opacity=(index+1)/10;
+      return worker.fetch(request(`/api/shares/${share.token}`,'PUT',{workspace:snapshot,modelIdentity:identity,revision:1,author:`Editor ${index}`}),env);
+    }));
+    assert.deepEqual(responses.map(response=>response.status),[200,200,200,200]);
+    const saved=await Promise.all(responses.map(response=>response.json() as Promise<any>));
+    assert.deepEqual(saved.map(row=>row.workspaceVersion).sort((a,b)=>a-b),[2,3,4,5]);
+    const rows=env.SHARES_DB.db.prepare('SELECT * FROM share_revisions ORDER BY version').all() as any[];
+    assert.equal(rows.length,5);
+    rows.slice(1).forEach((row,index)=>{
+      assert.equal(row.saved_at,now+index+1,'equal request clocks still produce strictly ordered save timestamps');
+      const editor=Number(row.author.split(' ')[1]);assert.equal(JSON.parse(row.workspace_json).meshes[0].opacity,(editor+1)/10);
+      assert.equal(saved[editor].workspaceVersion,row.version);assert.equal(Date.parse(saved[editor].updatedAt),row.saved_at);
+      assert.equal(saved[editor].revision,row.version,'response metadata belongs to this transaction');
+    });
+    const late=await worker.fetch(save(share.token,1,'Late older tab',true),env);assert.equal(late.status,200);
+    const result=await late.json() as any;assert.equal(result.workspaceVersion,6);assert.equal(Date.parse(result.updatedAt),now+5);
+    const latest=await (await worker.fetch(request(`/api/shares/${share.token}`),env)).json() as any;
+    assert.equal(latest.workspaceVersion,6);assert.deepEqual(latest.workspace,workspace(true));
+    assert.equal((env.SHARES_DB.db.prepare('SELECT COUNT(*) AS n FROM share_revisions').get() as any).n,6);
+  }finally{env.SHARES_DB.db.close();}
+});
+test('append transactions recheck permission, revocation, expiry and identity before retaining any snapshot',async()=>{
+  for(const change of ["editing_enabled=0,auth_epoch=auth_epoch+1","revoked_at=1","expires_at=1",`model_identity='${'ab'.repeat(32)}'`]){
+    const {env,worker}=setup();try{
+      const share=await create(worker,env),batch=env.SHARES_DB.batch.bind(env.SHARES_DB);
+      env.SHARES_DB.batch=async statements=>{
+        env.SHARES_DB.db.exec(`UPDATE shares SET ${change}`);
+        return batch(statements);
+      };
+      const response=await worker.fetch(save(share.token,1),env);
+      assert.equal(response.status,change.startsWith('editing')?403:change.startsWith('model')?409:404);
+      assert.equal((env.SHARES_DB.db.prepare('SELECT COUNT(*) AS n FROM share_revisions').get() as any).n,0);
+      assert.equal((env.SHARES_DB.db.prepare('SELECT workspace_version FROM shares').get() as any).workspace_version,1);
+    }finally{env.SHARES_DB.db.close();}
+  }
+});
+test('history counters stay consistent when a save commits after the initial link lookup',async()=>{
+  const {env,worker}=setup();try{
+    const share=await create(worker,env),prepare=env.SHARES_DB.prepare.bind(env.SHARES_DB),hash=await hashToken(share.token);
+    let changed=false;
+    env.SHARES_DB.prepare=sql=>{
+      if(!changed&&sql.includes("json_group_array(json_object('version'")){
+        changed=true;
+        const snapshot=JSON.stringify(workspace(true));
+        env.SHARES_DB.db.prepare('INSERT INTO share_revisions VALUES(?,?,?,?,?,?,?)').run(hash,2,snapshot,Buffer.byteLength(snapshot),'Concurrent editor',Date.now(),'concurrent-fixture');
+        env.SHARES_DB.db.prepare('UPDATE shares SET workspace_json=?,workspace_version=2,revision=2 WHERE token_hash=?').run(snapshot,hash);
+      }
+      return prepare(sql);
+    };
+    const response=await worker.fetch(request(`/api/shares/${share.token}/revisions`),env);
+    assert.equal(response.status,200);const history=await response.json() as any;
+    assert.equal(history.currentVersion,2);assert.equal(history.revision,2);assert.deepEqual(history.items.map((row:any)=>row.version),[2]);
   }finally{env.SHARES_DB.db.close();}
 });
 test('batch disabling sharing users leaves their public recipient access separate',async()=>{
