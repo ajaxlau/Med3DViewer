@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { SectionControls, SECTION_COLLAPSE_DELAY_MS } from './SectionControls';
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { shouldIgnoreHover } from '../lib/utils';
 import { listWorkspaceHistory, loadWorkspaceVersion, saveProtectedWorkspace, type WorkspaceHistoryItem } from '../lib/sharedWorkspace';
 import type { ViewerManager } from '../lib/ViewerManager';
@@ -31,6 +31,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
   const [status, setStatus] = useState('');
   const [operation, setOperation] = useState<'save' | 'load' | 'refresh' | null>(null);
   const [author, setAuthor] = useState('');
+  const [nameRequired, setNameRequired] = useState(false);
   const [items, setItems] = useState<WorkspaceHistoryItem[]>([]);
   const [selected, setSelected] = useState(session.workspaceVersion || 1);
   const [viewing, setViewing] = useState(session.workspaceVersion || 1);
@@ -38,9 +39,10 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
   const request = useRef<AbortController | null>(null);
   const authorInput = useRef<HTMLInputElement | null>(null);
   const detailsId = useId();
+  const nameErrorId = useId();
   const modelMatches = () => manager.modelLoadState.requestId === session.requestId && manager.modelLoadState.phase === 'ready' && manager.loadedModelIdentity === session.modelIdentity;
   useEffect(() => {
-    setAuthor(''); setItems([]); setExpanded(false); setPinned(false); setOperation(null); setStatus(''); setFocusAuthor(false);
+    setAuthor(''); setNameRequired(false); setItems([]); setExpanded(false); setPinned(false); setOperation(null); setStatus(''); setFocusAuthor(false);
     setViewing(session.workspaceVersion || 1); setSelected(session.workspaceVersion || 1);
     return () => { clearCollapse(); request.current?.abort(); request.current = null; };
   }, [session.token, session.requestId]);
@@ -81,7 +83,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
   if (!modelMatches()) return null;
   const expired = Date.parse(session.expiresAt) <= Date.now();
   const canSave = session.historyEnabled ? session.editingEnabled : session.role === 'edit';
-  const field = 'mt-1 block min-h-11 w-full min-w-0 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100';
+  const field = 'mt-1 block min-h-11 w-full min-w-0 rounded border border-zinc-300 bg-white px-2 text-xs font-normal normal-case tracking-normal text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100';
   if (session.includeWorkspace === false) return null;
   return <section ref={container} aria-label="Workspace controls" onMouseEnter={() => {
     if (shouldIgnoreHover()) return;
@@ -93,34 +95,35 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
       setExpanded(false);
     },SECTION_COLLAPSE_DELAY_MS);
   }} className="rounded-lg border border-zinc-200 bg-zinc-50/70 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-100">
-    <div className="flex items-center pr-3">
+    <div className="flex items-center gap-2 px-3 py-2">
       <button type="button" aria-label={`Workspace revisions: ${session.workspaceName || 'Workspace'}, revision ${session.historyEnabled ? viewing : session.revision}`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => {
         clearCollapse(); setExpanded(!expanded);
-      }} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left text-[11px] font-bold uppercase tracking-[0.05em] text-zinc-600 transition-colors hover:bg-zinc-100/70 dark:text-zinc-300 dark:hover:bg-zinc-800/60" title="Workspace revisions">
+      }} className="flex min-h-8 min-w-0 flex-1 items-center text-left text-xs font-bold uppercase tracking-wider text-zinc-700 transition-colors dark:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" title="Workspace revisions">
         <span className="min-w-0 flex-1 truncate">Workspace Revision</span>
-        <span className="shrink-0 text-[10px]">v{session.historyEnabled ? viewing : session.revision}</span>
       </button>
       <SectionControls label="workspace revisions" expanded={expanded} pinned={pinned} onPin={() => {
         clearCollapse(); setPinned(!pinned); if (!pinned) setExpanded(true);
       }} onToggle={() => { clearCollapse(); setExpanded(!expanded); }} />
     </div>
-    {expanded && <div id={detailsId} className="space-y-3 px-4 pb-3">
-      {session.workspaceName && <p className="truncate text-xs font-medium" title={session.workspaceName}>{session.workspaceName}</p>}
+    <div id={detailsId} aria-hidden={!expanded} inert={!expanded} className={`${SECTION_EXPANSION_CLASS} ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
+    <div className="overflow-hidden"><div className="space-y-3 px-3 pb-3">
+      {session.workspaceName && <p className="truncate text-xs" title={session.workspaceName}>{session.workspaceName}</p>}
       {session.historyEnabled && session.includeWorkspace && <>
         <div className="flex items-end gap-1">
-          <label className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Workspace Revision<select aria-label="Workspace Revision" disabled={operation === 'save' || expired || !items.length} className={field} value={selected} onChange={event => switchRevision(Number(event.target.value))}>
+          <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Workspace Revision<select aria-label="Workspace Revision" disabled={operation === 'save' || expired || !items.length} className={field} value={selected} onChange={event => switchRevision(Number(event.target.value))}>
             {!items.length && <option value={selected}>{operation ? 'Loading…' : `Revision ${viewing}`}</option>}
             {items.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.author} · {new Date(item.savedAt).toLocaleString()}</option>)}
           </select></label>
           <button aria-label="Refresh revisions" title="Refresh revisions" className="flex min-h-11 min-w-11 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-blue-400" disabled={!!operation || expired} onClick={() => void refresh()}><RotateCw size={15} /></button>
         </div>
-        {canSave && <label className="block text-[10px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Display name<input ref={authorInput} aria-label="Revision display name" maxLength={80} value={author} onChange={event => setAuthor(event.target.value)} className={field}/></label>}
+        {canSave && <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Revision Name<input ref={authorInput} aria-label="Revision Name" required aria-invalid={nameRequired || undefined} aria-describedby={nameRequired ? nameErrorId : undefined} maxLength={80} value={author} onChange={event => { setAuthor(event.target.value); if (event.target.value.trim()) setNameRequired(false); }} className={field}/>
+          {nameRequired && <span id={nameErrorId} role="alert" className="mt-1 block text-xs font-normal normal-case tracking-normal text-red-600 dark:text-red-400">Enter a revision name before saving.</span>}</label>}
       </>}
-    </div>}
-    <div className="px-4 pb-3">
+    </div></div></div>
+    <div className="px-3 pb-3">
       {canSave && <button disabled={!!operation || expired} className="min-h-11 w-full rounded bg-blue-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50" onClick={() => {
         if (session.historyEnabled && !author.trim()) {
-          setExpanded(true); setFocusAuthor(true);
+          clearCollapse(); setStatus(''); setExpanded(true); setNameRequired(true); setFocusAuthor(true);
           return;
         }
         void run('save', async signal => {

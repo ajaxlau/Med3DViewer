@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Pin, PinOff } from 'lucide-react';
 
 export const SECTION_COLLAPSE_DELAY_MS = 10_000;
+export const SECTION_EXPANSION_CLASS = 'grid transition-[grid-template-rows,opacity] duration-300 ease-in-out';
 
 export function SectionControls({ label, expanded, pinned, onToggle, onPin }: {
   label: string;

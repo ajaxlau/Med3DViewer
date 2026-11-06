@@ -1,4 +1,4 @@
-import { SectionControls, SECTION_COLLAPSE_DELAY_MS } from './SectionControls';
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useViewer } from '../context/ViewerContext';
 import { ChevronDown, ChevronUp, Loader2, Eye, EyeOff, Droplets, Camera, X, Copy, Video, Play, ChevronRight, Sparkles, Spline, Scissors, ZoomIn, ZoomOut, Compass, RotateCcw, ArrowLeftRight } from 'lucide-react';
@@ -156,7 +156,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
           </div>
           
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               meshVisOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -296,7 +296,7 @@ export function Sidebar({ collapsed, onClose }: { collapsed: boolean, onClose?: 
           </div>
 
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               advancedOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >

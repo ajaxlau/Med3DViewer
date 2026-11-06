@@ -38,7 +38,7 @@ const shareDownloadErrors: Record<string, string> = {
   SHARE_PASSWORD_INVALID: 'The sharing username or password was not accepted.',
   EDIT_SESSION_INVALID: 'Your editing session expired or permissions changed. Unlock editing again.',
   PASSWORD_INVALID: 'Choose a sharing password of 12–128 characters.',
-  AUTHOR_INVALID: 'Enter a display name of 1–80 characters.',
+  AUTHOR_INVALID: 'Enter a revision name of 1–80 characters.',
   USERNAME_INVALID: 'Use a username of 3–64 lowercase letters, digits, dots, hyphens or underscores, starting with a letter.',
   USER_CONFLICT: 'That sharing user changed or the username already exists. Refresh the sharing user list.',
   HISTORY_FULL: 'History storage is full. Your changes remain on this device; contact the administrator.',

@@ -8,7 +8,7 @@ The front-page login refactor uses the existing schema-3 database and assigned u
 
 - **Checkbox off:** create a public model-only address without a password. Analytics, object revisions and mesh display changes are excluded. Anonymous creation is limited to five attempts per source IP per day, plus the existing global creation quotas.
 - **Share workspace:** the sharer first uses **Log in** on the front page, then selects this option in Share and enters a workspace name and expiry. The administrator assigns the sharing account; the admin password is not accepted for publishing a workspace.
-- Recipients open the same `/s/<random-token>` address **without signing in**. If public editing is enabled, they enter a display name and click **Save Workspace** to publish changes. Adjusting tools or objects does not save automatically.
+- Recipients open the same `/s/<random-token>` address **without signing in**. If public editing is enabled, they enter a revision name and click **Save Workspace** to publish changes. Adjusting tools or objects does not save automatically.
 - Open **Analytic Tools** to find **Workspace Revision** between **Analytics** and **Project IO**. The section expands/retracts with matching neutral styling and can be pinned open. There is no separate workspace header icon. Selecting **Workspace Revision** immediately loads that saved state, replacing local unsaved changes; it does not save. A subsequent explicit Save appends a new revision. Concurrent recipients each receive a different revision number, assigned atomically with a strictly increasing server save timestamp, including saves from older tabs.
 - Opening Share for an existing workspace uses the current login before displaying its QR/copy controls. Since viewing is public, someone who already has the address can still copy or forward it themselves. This password controls the platform's publishing action, not recipient access.
 
@@ -58,7 +58,7 @@ Existing addresses remain publicly viewable after upgrading. Previously issued e
 The admin password is used only for administration. The manager supports:
 
 - Assigning sharing users, changing their individual passwords, and enabling/disabling sharing access. Select multiple users to disable their sharing access in one action. Up to 50 sharing users are supported; usernames are unique and permanent.
-- Switching a workspace between **public view only** and **public view + public editing**. Recipients never need a password. Display names on revisions are self-reported labels, not authenticated identities.
+- Switching a workspace between **public view only** and **public view + public editing**. Recipients never need a password. Revision names on revisions are self-reported labels, not authenticated identities.
 - Editing labels and expiry. The maximum remains **180 days from original creation**. Sharing, saving, viewing and admin edits do not reset that lifetime.
 - Selecting up to 50 workspace links for **batch revocation**, which stops viewing, model downloads, history access and saves for every holder of those selected links.
 
@@ -74,7 +74,7 @@ Expiry/revocation is checked on every API/model/history/save request. Scheduled 
 
 1. With a synthetic/de-identified multi-mesh 3MF, hide a mesh, change opacity and add analytic/annotation objects. Publish with the checkbox and assigned sharing credentials.
 2. Open that public URL on another device without a password. Confirm mesh and analytic state. Change objects; verify reopening still shows the saved state until **Save workspace** is clicked.
-3. Save with different display names, select earlier versions, and verify an old version can be saved as a new version without replacing its history. Two editors saving from the same revision must both succeed with distinct revision numbers and increasing server save timestamps; both snapshots must remain selectable. Check section placement, pin/unpin behavior, automatic revision loading and mobile drawer collapse/expansion.
+3. Save with different revision names, select earlier versions, and verify an old version can be saved as a new version without replacing its history. Two editors saving from the same revision must both succeed with distinct revision numbers and increasing server save timestamps; both snapshots must remain selectable. Check section placement, pin/unpin behavior, automatic revision loading and mobile drawer collapse/expansion.
 4. Confirm admin credentials cannot publish workspaces, sharing credentials cannot administer them, and disabled/old sharing passwords fail after an admin change.
 5. Test public view-only permission, individual/batch user disable, bounded expiry and batch workspace revocation. Test both checkbox settings and ensure QR/copy/WhatsApp addresses contain no original source URL.
 6. Complete physical iOS/Android, representative real 3MF and 3D Slicer import/export checks. Local synthetic tests cannot establish device GPU fit or clinical measurement accuracy.

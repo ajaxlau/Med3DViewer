@@ -492,7 +492,7 @@ async function saveHistory(request: Request, record: ShareRecord, env: ShareEnvi
   const body=await readJson(request) as any;requestFields(body,['workspace','modelIdentity','revision','author']);
   revision(body.revision); // The client's base may be old: each explicit save appends its own snapshot.
   const author=revisionAuthor(body.author);
-  if(!author)throw new ShareError(400,'AUTHOR_INVALID','Enter a display name of 1–80 characters.');
+  if(!author)throw new ShareError(400,'AUTHOR_INVALID','Enter a revision name of 1–80 characters.');
   if(body.modelIdentity!==record.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity changed. Reload before saving.');
   let snapshot:string;
   try{snapshot=JSON.stringify(validateSharedWorkspace(body.workspace));}catch{throw new ShareError(400,'INVALID_WORKSPACE','The workspace contains unsupported model/planning state.');}

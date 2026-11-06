@@ -1,4 +1,4 @@
-import { SectionControls, SECTION_COLLAPSE_DELAY_MS } from './SectionControls';
+import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { useViewer } from '../context/ViewerContext';
 import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Layers } from 'lucide-react';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
@@ -297,7 +297,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
 
           {/* Full Expanded Tools Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isToolsExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -626,7 +626,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
           {projectIoError && <p role="alert" className="px-3 py-2 text-xs text-red-700 dark:text-red-300">{projectIoError}</p>}
           {/* Expanded Project IO Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isProjectIoExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
@@ -776,7 +776,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
 
           {/* Expanded Object List Grid */}
           <div 
-            className={`grid transition-all duration-300 ease-in-out ${
+            className={`${SECTION_EXPANSION_CLASS} ${
               isObjectListExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
             }`}
           >
