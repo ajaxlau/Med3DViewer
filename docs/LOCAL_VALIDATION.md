@@ -92,3 +92,10 @@ At that initial stage, protected sharing was limited to Dropbox STL with procedu
 - Beta Preview and scheduled-only cleanup packaging pass without publishing, both with a synthetic UUID override and with the recorded beta profile. Cleanup has no public workers.dev/preview URL, assets or privileged secret. CI now checks both generated beta bundles using a synthetic ID; it does not deploy or migrate a remote database.
 - All 139 direct Node 22 tests and TypeScript passed locally. The four artifact subprocess checks run separately in CI. The phone runbook's fresh-schema SQL was verified in an in-memory SQLite database, including repeated scope insertion, the result `beta|3|4|2|1` and all three migration bookkeeping rows.
 - Remote beta schema, runtime secret names/settings, cleanup scheduling and live acceptance require owner confirmation. Database creation/UUID confirmation is not proof that the schema or runtime binding is ready. PR #12 remains draft pending that handoff; beta/main have not been merged by this preparation.
+
+
+## Beta runtime-secret bootstrap order (6 November 2026)
+
+- Owner confirmed beta schema result `beta|3|4|2|1` and the beta dashboard notice: Variables cannot be added to a Worker that only has static assets. The current beta commit's Wrangler configuration was inspected and contains assets with no Worker entry point.
+- The handoff guide now makes the sequence explicit: after schema/build settings and owner approval, merge/deploy the PR backend to beta first; then add beta-only runtime secrets and check configuration readiness. The existing application rejects protected-sharing operations while either required secret is absent. No database or application-code change is needed for this correction; main remains a separate release.
+- A direct Worker check confirmed that when either or both beta runtime secrets are missing, `/api/shares/config` returns `enabled:false` and protected create/read/save/model/history requests return 503 without database access. The existing Worker tests also passed. This verifies the bootstrap boundary, not the remote beta deployment.

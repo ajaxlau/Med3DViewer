@@ -85,4 +85,4 @@ verification; no deployment-provider success alone closes that gate.
 
 ## Beta handoff preparation
 
-The owner-confirmed beta database is recorded in a separate profile. Root Worker identity, tier isolation, publishing branch guards and scheduled cleanup packaging are prepared and checked in CI. Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the phone/tablet Cloudflare and GitHub setup. Runtime beta schema/secrets/bindings and owner acceptance remain pending; preparation does not imply a beta merge or production release.
+The owner-confirmed beta database is recorded in a separate profile. Root Worker identity, tier isolation, publishing branch guards and scheduled cleanup packaging are prepared and checked in CI. Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the phone/tablet Cloudflare and GitHub setup. The owner verified beta schema `beta|3|4|2|1`. Runtime secrets/bindings and owner acceptance remain pending; the assets-only beta deployment must receive the PR backend before the dashboard permits runtime secrets. Preparation does not imply a beta merge or production release.

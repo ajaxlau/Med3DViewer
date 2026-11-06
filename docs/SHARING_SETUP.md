@@ -154,7 +154,7 @@ Initialize the scope via the dashboard SQL above. After building, `npm run check
 
 ## Promotion to beta (requires test review)
 
-Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the owner-confirmed beta database and phone/tablet handoff. The beta profile supplies its non-secret ID/name/tier; do not reuse test resources or put beta settings in Previews Base. Runtime secrets belong only to the existing beta Preview. Publishing beta now requires the actual `beta` source branch, and the command explicitly targets Preview `beta`.
+Follow [BETA_FINAL_TESTING.md](BETA_FINAL_TESTING.md) for the owner-confirmed beta database and phone/tablet handoff. The beta profile supplies its non-secret ID/name/tier; do not reuse test resources or put beta settings in Previews Base. Runtime secrets belong only to the existing beta Preview. If its editor reports that beta has only static assets, deploy the reviewed PR backend to beta first with owner approval, then add the secrets; sharing stays disabled until they are present. Publishing beta now requires the actual `beta` source branch, and the command explicitly targets Preview `beta`.
 
 The generated configuration repeats D1 and runtime variables under `previews` because Worker Previews do not inherit top-level resources. Its top-level D1 declaration also supports explicit migrations. The separate scheduled-only cleanup Worker uses this same beta profile, has public URLs disabled and requires no admin/encryption secrets.
 

@@ -1,6 +1,6 @@
 # PR #12 → beta: final testing setup
 
-PR #12 targets `beta`. This prepares the existing **beta Worker Preview**, not a production release. Keep `main`, the production deployment and the working sharing-test Worker in place. Merge only after the beta database and settings below have been checked with the owner.
+PR #12 targets `beta`. This prepares the existing **beta Worker Preview**, not a production release. Keep `main`, the production deployment and the working sharing-test Worker in place. Merge only after the beta database and Preview build settings below have been checked and the owner approves the beta handoff. An assets-only beta deployment needs the PR backend deployed before its runtime secret editor becomes available; follow step 3 for that order.
 
 ## Confirmed resources
 
@@ -92,7 +92,18 @@ These settings can be saved before merge. The old beta code does not yet contain
 
 ## 3. Add beta runtime secrets
 
-Within the existing **beta Preview**, open Settings → Variables and Secrets. These are **runtime** secrets, not build variables, GitHub secrets or the Cloudflare build token:
+On the existing **beta Preview**, the dashboard may currently say **Variables cannot be added to a Worker that only has static assets**. The old beta configuration contains only assets; PR #12 adds `worker/entry.ts`. This is a deployment-order issue, not a missing database permission.
+
+For that exact notice, use this order:
+
+1. Complete the beta schema check (`beta | 3 | 4 | 2 | 1`) and save the beta-specific Preview command in step 2.
+2. With owner approval, merge PR #12 into **beta** and let a new build of the merge commit deploy using `npm run preview:shares:beta`. Keep main/Production unchanged. Do not retry an old assets-only build.
+3. Confirm the new beta deployment has the Worker script plus assets. Open `/api/shares/config` in a new Private window: JSON with `enabled: false` is expected while the required secrets are missing. Protected creation, reads and saves fail closed until both secrets are configured; do not copy test keys to bypass this step.
+4. Return to **beta → Settings → Variables and Secrets** and add the two secrets below. Save/deploy the secret changes on beta, then recheck `/api/shares/config` for `enabled: true` and `historyEnabled: true`.
+
+If the secret control is still disabled after that new Worker deployment, report its current notice. Do not move the secrets to Production or Previews Base as a workaround.
+
+These are **runtime** secrets, not build variables, GitHub secrets or the Cloudflare build token:
 
 | Name | Value/purpose |
 | --- | --- |
@@ -127,7 +138,7 @@ After deployment, confirm **SHARES_DB → med3dviewer-shares-beta**, runtime `SH
 1. Open [PR #12](https://github.com/ajaxlau/Med3DViewer/pull/12). Confirm **base beta**, the reviewed latest head, no conflicts, and the checks for that exact commit. GitHub Actions validates tests, assets, ordinary packaging, beta packaging and cleanup packaging without deployment credentials.
 2. This repository uses Cloudflare's Git integration for deployment. Do not add a GitHub deployment workflow or paste a Cloudflare API token into repository secrets for this handoff. No additional GitHub secret is required by CI.
 3. Record the current beta commit/deployment before merging. At preparation time beta is `100f409997217f1c1fc1c6323e3916f9a70105ba`; main is `123a5edc76c2f50ce9ad9d3be14e71ec0ee8e43f`. Recheck if either moved.
-4. Once the database results, beta build settings and beta-only secrets are confirmed, make the draft **Ready for review** and merge PR #12 into **beta**, preferably with a merge commit to retain its history. Do not merge into main.
+4. Once the database results and beta build settings are confirmed and the owner approves the handoff, make the draft **Ready for review** and merge PR #12 into **beta**, preferably with a merge commit to retain its history. If the old deployment is assets-only, add beta-only runtime secrets **after** this first backend deployment as described in step 3; secret readiness is not a prerequisite that blocks installing the backend. Do not merge into main.
 5. Keep `beta` as the long-lived testing branch. Keep `codex/secure-workspace-preview` while the existing test Worker tracks it; do not delete it as part of this merge. A future production release should use a separate beta → main PR after final testing.
 6. Confirm the new beta build logs execute `npm run build:cloudflare`, then `npm run preview:shares:beta`, with the merge SHA. Confirm both GitHub CI and the Cloudflare build succeed. Deploy the cleanup Worker from that same beta commit.
 
@@ -137,7 +148,7 @@ If available for the account, protect `beta` and `main` with pull requests and t
 
 Copy the actual **beta Preview URL** from Cloudflare. It is normally `https://beta-ntec3dpo-m3dv.x-panda.workers.dev/`; use the displayed address rather than the production Visit link. New beta shares use this beta origin; production-prefix links require a later main release.
 
-Open `/api/shares/config` in a new Private/Incognito window. Require JSON with **`enabled: true` and `historyEnabled: true`**; an HTML viewer page is not a passing API check. Then confirm beta's effective **SHARES_DB binding, beta scope and two secret names** in Cloudflare. A successful build alone does not prove runtime configuration.
+Open `/api/shares/config` in a new Private/Incognito window. After adding both secrets, require JSON with **`enabled: true` and `historyEnabled: true`**; an HTML viewer page is not a passing API check. Then confirm beta's effective **SHARES_DB binding, beta scope and two secret names** in Cloudflare. A successful build alone does not prove runtime configuration.
 
 1. Open `/admin/shares` on the beta origin with the beta admin password. Create a beta sharing user with a different password. No test user accounts are copied automatically.
 2. Use de-identified Dropbox STL, multi-mesh 3MF and self-contained GLB. Check local file loading too. Confirm guest QR/copy sharing conceals the source, and signed-in workspace sharing restores mesh visibility/opacity plus supported analytic objects and annotations.
