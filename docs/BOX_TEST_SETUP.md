@@ -161,3 +161,16 @@ The script supplies the Box-test database name and tier. Keep branch Preview bui
 While the backend is being implemented, prepare a dedicated disposable folder in the department-managed Box account and confirm you can create/authorize a Box application. Do not enter the Box account password into the viewer/admin page. The future connection will redirect to Box's official authorization page.
 
 The exact OAuth callback, required application scopes and encrypted token-storage migration will be provided with the Box connection implementation. Do not invent callback URLs or create public Box sharing links. A Box developer token is not a permanent department connection. Existing Dropbox handling remains the only storage reader at this checkpoint.
+
+
+## Confirmed Box application and folder
+
+Owner-confirmed test folder ID: **`435218173835`**, expected account path `https://app.box.com/folder/435218173835`.
+
+The owner is using a personal Box account for initial testing and has created the `Med3DViewer Box Test` OAuth/User application. Console screenshots show both content read and write scopes selected. Administrative/developer privileges and the as-user setting are not required for this workflow. This records configuration evidence; it does not establish successful API access.
+
+The folder is the proposed upload destination, not permission to expose its entire contents to workspace recipients. The connection implementation must verify the authorized account's folder access and enforce workspace/file membership server-side. Do not make the folder public or migrate this personal-account folder ID into beta/main automatically.
+
+Client credentials remain private. The OAuth callback and token-storage backend are still pending; the current `https://app.box.com` redirect entry is not the final application callback. Do not attempt connection or use a temporary developer token as a permanent connection yet.
+
+Implementation references: [Box OAuth without SDKs](https://developer.box.com/guides/authentication/oauth2/without-sdk) and [refresh-token rotation](https://developer.box.com/guides/authentication/tokens/refresh). Box refresh tokens expire after inactivity and rotate on use; implementation must coordinate refreshes and maintain/reconnect the connection before expiry rather than assume a workspace's 180-day lifetime keeps Box authorization valid.
