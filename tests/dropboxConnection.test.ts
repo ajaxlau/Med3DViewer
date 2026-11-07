@@ -20,10 +20,13 @@ function fixture() {
   const env: ShareEnvironment = { SHARES_DB: adapter, SHARES_ENABLED: 'true', SHARES_ENVIRONMENT: 'box-test', SHARES_CREATE_KEY: admin, SHARES_ENCRYPTION_KEY: 'b'.repeat(64), BOX_ENABLED: 'false', DROPBOX_ENABLED: 'true', DROPBOX_ORIGIN: origin, DROPBOX_FOLDER_PATH: folder, DROPBOX_APP_KEY: 'synthetic-client-id', DROPBOX_APP_SECRET: 'synthetic-client-secret', DROPBOX_CREDENTIALS_KEY: 'c'.repeat(64) };
   let clock = Date.UTC(2026,10,7), calls = 0, account = 'dbid:original-account', upload = true;
   let tokenHook: (() => Promise<void>) | null = null;
+  let omitScope = false;
+  let providerFailure: {path:string;status:number;body:string} | null = null;
   const files = new Map<string, Uint8Array>(); let badDownload = false, failCleanup = false;
   const upstream = async (input: any, init: RequestInit) => {
     calls++;
     const url = String(input); assert.equal(init.redirect, 'error');
+    if(providerFailure && url.endsWith(providerFailure.path)) return new Response(providerFailure.body,{status:providerFailure.status});
     if (url.endsWith('/oauth2/token')) {
       assert.equal(init.method, 'POST');
       if (tokenHook) { const hook = tokenHook; tokenHook = null; await hook(); }
@@ -31,6 +34,7 @@ function fixture() {
       assert.equal(body.get('client_secret'), env.DROPBOX_APP_SECRET);
       const value: any = token(body.get('grant_type') === 'refresh_token' ? '-rotated' : '');
       if (!upload) value.scope = 'account_info.read files.metadata.read';
+      if (omitScope) delete value.scope;
       if (body.get('grant_type') === 'refresh_token') { assert.equal(body.get('refresh_token'),'test-refresh-secret'); delete value.refresh_token; }
       return new Response(JSON.stringify(value));
     }
@@ -60,7 +64,7 @@ function fixture() {
   }
   const callback = (s: {state:string;cookie:string}, extra = '&code=synthetic-code') => request('/api/shares/dropbox/callback?state=' + s.state + extra,'GET',false,s.cookie);
   async function connect() { const s = await start(); const response = await worker.fetch(callback(s),env); assert.equal(response.headers.get('Location'),'/admin/shares?dropbox=connected'); return s; }
-  return { db,env,worker,request,start,callback,connect,upstream:upstream as typeof fetch,get calls(){return calls;},advance(ms:number){clock+=ms;},get now(){return clock;},setAccount(id:string){account=id;},denyUpload(){upload=false;},onToken(hook:()=>Promise<void>){tokenHook=hook;},get diagnosticFiles(){return files.size;},corruptDownload(){badDownload=true;},failCleanup(){failCleanup=true;} };
+  return { db,env,worker,request,start,callback,connect,upstream:upstream as typeof fetch,get calls(){return calls;},advance(ms:number){clock+=ms;},get now(){return clock;},setAccount(id:string){account=id;},denyUpload(){upload=false;},onToken(hook:()=>Promise<void>){tokenHook=hook;},get diagnosticFiles(){return files.size;},corruptDownload(){badDownload=true;},failCleanup(){failCleanup=true;},failProvider(path:string,status:number,body:string){providerFailure={path,status,body};},omitTokenScope(){omitScope=true;} };
 }
 test('Dropbox administrator endpoints reject anonymous and cross-origin requests before provider access',async()=>{
   const f=fixture();try {
@@ -103,8 +107,8 @@ test('expired, duplicate and stale authorization callbacks never call Dropbox',a
 test('denied authorization and missing content scopes yield safe failure redirects without secrets',async()=>{
   const f=fixture();try {
     let s=await f.start();let r=await f.worker.fetch(f.callback(s,'&error=access_denied&error_description=SECRET'),f.env);
-    assert.equal(r.status,303);assert.equal(r.headers.get('Location'),'/admin/shares?dropbox=failed');assert.equal(f.calls,0);
-    s=await f.start();f.denyUpload();r=await f.worker.fetch(f.callback(s),f.env);assert.equal(r.headers.get('Location'),'/admin/shares?dropbox=failed');
+    assert.equal(r.status,303);assert.match(r.headers.get('Location')!, /^\/admin\/shares\?dropbox=failed&stage=/);assert.equal(f.calls,0);
+    s=await f.start();f.denyUpload();r=await f.worker.fetch(f.callback(s),f.env);assert.match(r.headers.get('Location')!, /^\/admin\/shares\?dropbox=failed&stage=/);
     assert.equal((f.db.prepare('SELECT credentials FROM dropbox_connection').get() as any).credentials,null);
   }finally{f.db.close();}
 });
@@ -114,7 +118,7 @@ test('disconnect invalidates pending callbacks and keeps the account pin for rec
     assert.equal((await f.worker.fetch(f.request('/api/shares/admin/dropbox/disconnect','POST'),f.env)).status,200);
     const count=f.calls;assert.equal((await f.worker.fetch(f.callback(pending),f.env)).status,400);assert.equal(f.calls,count);
     assert.equal((f.db.prepare('SELECT credentials FROM dropbox_connection').get() as any).credentials,null);
-    f.setAccount('98765');const s=await f.start();assert.equal((await f.worker.fetch(f.callback(s),f.env)).headers.get('Location'),'/admin/shares?dropbox=failed');
+    f.setAccount('98765');const s=await f.start();assert.match((await f.worker.fetch(f.callback(s),f.env)).headers.get('Location')!, /^\/admin\/shares\?dropbox=failed&stage=/);
     assert.equal((f.db.prepare('SELECT account_id FROM dropbox_connection').get() as any).account_id,'dbid:original-account');
   }finally{f.db.close();}
 });
@@ -166,7 +170,7 @@ test('disconnect during code exchange or refresh cannot resurrect saved credenti
       const pending=refresh?null:await f.start();
       f.onToken(async()=>{assert.equal((await f.worker.fetch(f.request('/api/shares/admin/dropbox/disconnect','POST'),f.env)).status,200);});
       if(refresh){f.advance(3600_000);await assert.rejects(()=>dropboxAccessToken(f.env,f.upstream,f.now),/connection changed/);}
-      else assert.equal((await f.worker.fetch(f.callback(pending!),f.env)).headers.get('Location'),'/admin/shares?dropbox=failed');
+      else assert.match((await f.worker.fetch(f.callback(pending!),f.env)).headers.get('Location')!, /^\/admin\/shares\?dropbox=failed&stage=/);
       const row=f.db.prepare('SELECT status,credentials FROM dropbox_connection').get() as any;
       assert.equal(row.status,'disconnected');assert.equal(row.credentials,null);
     }finally{f.db.close();}
@@ -215,4 +219,28 @@ test('migration 0006 preserves populated schema-5 users, workspaces and historic
   names.forEach((name,i)=>assert.equal(JSON.stringify(db.prepare('SELECT * FROM '+name).all()),before[i]));
   assert.equal((db.prepare('SELECT version FROM share_schema_version').get() as any).version,6);
  }finally{db.close();}
+});
+
+test('callback diagnostics identify provider rejection without exposing response bodies or credentials',async()=>{
+ const cases=[
+  {path:'/oauth2/token',status:400,body:{error:'invalid_client',error_description:'SECRET client credentials'},stage:'token-exchange',reason:'DROPBOX_CLIENT_REJECTED'},
+  {path:'/oauth2/token',status:400,body:{error:'invalid_grant',error_description:'SECRET authorization code'},stage:'token-exchange',reason:'DROPBOX_GRANT_REJECTED'},
+  {path:'/users/get_current_account',status:401,body:{error_summary:'SECRET source URL',error:{'.tag':'expired_access_token'}},stage:'account-check',reason:'DROPBOX_HTTP_401'},
+  {path:'/files/list_folder',status:403,body:{error:{'.tag':'missing_scope'},required_scope:'SECRET'},stage:'folder-check',reason:'DROPBOX_SCOPE_REQUIRED'},
+ ];
+ for(const item of cases){const f=fixture();try {
+  const pending=await f.start();f.failProvider(item.path,item.status,JSON.stringify(item.body));
+  const response=await f.worker.fetch(f.callback(pending),f.env);
+  const location=response.headers.get('Location')!;const params=new URL(location,origin).searchParams;
+  assert.equal(response.status,303);assert.equal(params.get('stage'),item.stage);assert.equal(params.get('reason'),item.reason);assert(!location.includes('SECRET'));assert(!location.includes('synthetic-client-secret'));assert(!location.includes('synthetic-code'));
+  assert.equal((f.db.prepare('SELECT status FROM dropbox_connection').get() as any).status,'reconnect');
+ }finally{f.db.close();}}
+});
+
+test('an omitted OAuth scope is accepted when unchanged, but an explicitly reduced scope still fails',async()=>{
+ const f=fixture();try {f.omitTokenScope();await f.connect();assert.equal(await dropboxAccessToken(f.env,f.upstream,f.now),'test-access-secret');}
+ finally{f.db.close();}
+ const reduced=fixture();try {reduced.denyUpload();const pending=await reduced.start();const response=await reduced.worker.fetch(reduced.callback(pending),reduced.env);
+ assert.equal(new URL(response.headers.get('Location')!,origin).searchParams.get('reason'),'DROPBOX_SCOPE_REQUIRED');
+ }finally{reduced.db.close();}
 });

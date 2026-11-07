@@ -1,3 +1,4 @@
+import { safeDropboxReason } from '../src/lib/dropboxDiagnostics';
 import type { ShareEnvironment } from './index';
 import { randomToken } from './workspaceAccess';
 import { databaseScopeMatches } from './cleanup';
@@ -73,14 +74,24 @@ async function provider(url: string, init: RequestInit, upstream: ProviderFetch,
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
     const response = await upstream(url, { ...init, redirect: 'error', signal: controller.signal });
-    if (!response.ok) { await response.body?.cancel(); throw new DropboxError(502, 'DROPBOX_REQUEST_FAILED', 'Dropbox did not accept the request. Check app permissions or reconnect.'); }
+    // Read bounded error bodies only to select fixed diagnostic codes.
+    // Raw provider text is never returned, logged or stored.
     reader = response.body?.getReader();
-    if (!reader) throw new Error('Empty response');
+    if (!reader) throw new DropboxError(502, response.ok ? 'DROPBOX_RESPONSE_INVALID' : `DROPBOX_HTTP_${response.status}`, 'Dropbox returned an empty response.');
     const chunks: Uint8Array[] = []; let length = 0;
     for (;;) { const part = await reader.read(); if (part.done) break; length += part.value.byteLength; if (length > 64 * 1024) throw new Error('Large response'); chunks.push(part.value); }
     const bytes = new Uint8Array(length); let offset = 0;
     for (const part of chunks) { bytes.set(part, offset); offset += part.byteLength; }
-    return raw ? bytes : JSON.parse(new TextDecoder().decode(bytes));
+    if (!response.ok) {
+      let body: any; try { body = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* No provider text is exposed. */ }
+      const tag = typeof body?.error === 'string' ? body.error : body?.error?.['.tag'];
+      const known: Record<string, string> = { invalid_client: 'DROPBOX_CLIENT_REJECTED', invalid_grant: 'DROPBOX_GRANT_REJECTED', invalid_scope: 'DROPBOX_SCOPE_REQUIRED', missing_scope: 'DROPBOX_SCOPE_REQUIRED' };
+      const code = typeof tag === 'string' && Object.hasOwn(known, tag) ? known[tag] : `DROPBOX_HTTP_${response.status}`;
+      throw new DropboxError(502, code, 'Dropbox rejected the request. Check the connection diagnostic.');
+    }
+    if (raw) return bytes;
+    try { return JSON.parse(new TextDecoder().decode(bytes)); }
+    catch { throw new DropboxError(502, 'DROPBOX_RESPONSE_INVALID', 'Dropbox returned an unexpected response.'); }
   } catch (error) {
     await reader?.cancel().catch(() => {});
     if (error instanceof DropboxError) throw error;
@@ -90,17 +101,21 @@ async function provider(url: string, init: RequestInit, upstream: ProviderFetch,
 async function tokens(env: Env, grant: Record<string, string>, upstream: ProviderFetch): Promise<Credentials> {
   const result = await provider('https://api.dropboxapi.com/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ...grant, client_id: env.DROPBOX_APP_KEY!, client_secret: env.DROPBOX_APP_SECRET! }).toString() }, upstream);
   const valid = (s: unknown) => typeof s === 'string' && /^[A-Za-z0-9._~+/=-]{1,8192}$/.test(s);
-  if (grant.grant_type === 'authorization_code' && (typeof result.scope !== 'string' || !SCOPES.every(s => result.scope.split(' ').includes(s)))) throw new DropboxError(403, 'DROPBOX_SCOPE_REQUIRED', 'Enable the four required Dropbox permissions and reconnect.');
+  // OAuth permits omitting scope when it is identical to the requested scope.
+  // This flow always requests the same fixed set; an explicitly reduced scope fails.
+  if (grant.grant_type === 'authorization_code' && result.scope !== undefined && (typeof result.scope !== 'string' || !SCOPES.every(s => result.scope.split(' ').includes(s)))) throw new DropboxError(403, 'DROPBOX_SCOPE_REQUIRED', 'Enable the four required Dropbox permissions and reconnect.');
   if (grant.grant_type === 'refresh_token' && !result.refresh_token) result.refresh_token = grant.refresh_token;
   if (!valid(result.access_token) || !valid(result.refresh_token) || !Number.isSafeInteger(result.expires_in) || result.expires_in < 120 || result.expires_in > 86400) throw new DropboxError(502, 'DROPBOX_TOKEN_INVALID', 'Dropbox returned an invalid authorization response.');
   return { access_token: result.access_token, refresh_token: result.refresh_token, expires_in: result.expires_in };
 }
-async function checkFolder(env: Env, access: string, expectedAccount: string | null, upstream: ProviderFetch) {
+async function checkFolder(env: Env, access: string, expectedAccount: string | null, upstream: ProviderFetch, setStage?: (stage: string) => void) {
+  setStage?.('account-check');
   const auth = { Authorization: `Bearer ${access}` };
   const user = await provider('https://api.dropboxapi.com/2/users/get_current_account', { method: 'POST', headers: auth }, upstream);
   if (!ID.test(user.account_id || '') || typeof user.name?.display_name !== 'string' || user.name.display_name.length > 256 || user.disabled === true || (expectedAccount && user.account_id !== expectedAccount)) throw new DropboxError(409, 'DROPBOX_ACCOUNT_MISMATCH', 'Reconnect the original Dropbox account.');
   // Never send directory entries or cursors to the browser. This confirms metadata
   // access only; the explicit transfer test proves read/write access separately.
+  setStage?.('folder-check');
   const folder = await provider('https://api.dropboxapi.com/2/files/list_folder', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '', limit: 1, recursive: false }) }, upstream);
   if (!Array.isArray(folder.entries)) throw new DropboxError(502, 'DROPBOX_FOLDER_PERMISSION', 'The Dropbox app folder is unavailable.');
   return { account_id: user.account_id as string, account_name: user.name.display_name as string, folder_id: '', folder_name: 'App folder' };
@@ -197,20 +212,23 @@ export async function handleDropboxConnection(request: Request, env: Env, upstre
       if (!TOKEN.test(state) || !browser || url.searchParams.getAll('state').length !== 1 || url.searchParams.getAll('code').length > 1) throw new DropboxError(400, 'DROPBOX_STATE_INVALID', 'Restart the Dropbox connection from the administrator page.');
       const pending = await env.SHARES_DB!.prepare("DELETE FROM dropbox_oauth_states WHERE state_hash=? AND browser_hash=? AND expires_at>? AND epoch=(SELECT epoch FROM dropbox_connection WHERE id=1 AND status='connecting') RETURNING epoch").bind(await digest(state), await digest(browser), now).first<{epoch:number}>();
       if (!pending) throw new DropboxError(400, 'DROPBOX_STATE_INVALID', 'This Dropbox authorization expired or was already used.');
-      let success = false;
+      let success = false, stage = 'consent', reason = 'DROPBOX_INTERNAL_FAILED';
       try {
         const code = url.searchParams.get('code');
         if (url.searchParams.has('error') || !code || code.length > 2048 || !/^[\x21-\x7E]+$/.test(code)) throw new DropboxError(400, 'DROPBOX_DENIED', 'Dropbox authorization was not completed.');
+        stage = 'token-exchange';
         const fresh = await tokens(env, { grant_type: 'authorization_code', code, redirect_uri: env.DROPBOX_ORIGIN + CALLBACK }, upstream);
         const row = await connection(env);
-        if (!row || row.epoch !== pending.epoch || row.status !== 'connecting') throw new Error('Stale connection');
-        const identity = await checkFolder(env, fresh.access_token, row.account_id, upstream);
+        if (!row || row.epoch !== pending.epoch || row.status !== 'connecting') throw new DropboxError(409, 'DROPBOX_CONNECTION_CHANGED', 'The connection changed.');
+        const identity = await checkFolder(env, fresh.access_token, row.account_id, upstream, value => { stage = value; });
+        stage = 'save-connection';
         const result = await env.SHARES_DB!.prepare("UPDATE dropbox_connection SET status='connected',account_id=?,account_name=?,folder_id=?,folder_name=?,credentials=?,access_expires_at=?,refresh_due_at=?,updated_at=? WHERE id=1 AND epoch=? AND status='connecting'")
           .bind(identity.account_id, identity.account_name, identity.folder_id, identity.folder_name, await seal(fresh, env, { ...row, ...identity }), now + fresh.expires_in * 1000, now + 10 * 86400_000, now, row.epoch).run();
         success = !!result.meta?.changes;
-      } catch { /* Callback redirect never contains provider codes, tokens or errors. */ }
+        if (!success) reason = 'DROPBOX_CONNECTION_CHANGED';
+      } catch (error) { reason = safeDropboxReason(error instanceof DropboxError ? error.code : 'DROPBOX_INTERNAL_FAILED'); }
       if (!success) await failConnection(env, pending.epoch);
-      return new Response(null, { status: 303, headers: { ...headers, Location: `/admin/shares?dropbox=${success ? 'connected' : 'failed'}`, 'Set-Cookie': cookie('', 0) } });
+      return new Response(null, { status: 303, headers: { ...headers, Location: `/admin/shares?${new URLSearchParams(success ? { dropbox: 'connected' } : { dropbox: 'failed', stage, reason }).toString()}`, 'Set-Cookie': cookie('', 0) } });
     }
     if (path === '/api/shares/admin/dropbox/check' && request.method === 'POST') {
       const access = await dropboxAccessToken(env, upstream, now), row = await connection(env);

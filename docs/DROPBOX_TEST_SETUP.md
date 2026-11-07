@@ -146,3 +146,24 @@ Report `connected / metadata passed / transfer passed`, or the first visible err
 - Once terminal setup is complete, `unset CLOUDFLARE_API_TOKEN` and revoke the temporary token if no longer needed. Keep the permanent runtime app/encryption secrets.
 
 The 180-day expiry belongs to the platform workspace, not the provider token. Provider revocation, deleted files or account/storage restrictions can still make models unavailable. [Dropbox OAuth](https://developers.dropbox.com/oauth-guide) and [App folder permissions](https://www.dropbox.com/developers/reference/developer-guide).
+
+
+## Authorization failure diagnostics (no additional migration)
+
+The reconnect message alone does not identify the failure. Update this branch and deploy the current artifact to show a fixed diagnostic stage/code. Keep schema 6 and all existing secrets unchanged while diagnosing. From the existing authenticated Codespaces terminal:
+
+```bash
+git pull --ff-only
+npm run build:cloudflare
+node scripts/share-cloudflare.mjs box-test deploy
+```
+
+Start a new Connect Dropbox attempt; an old failure URL cannot acquire a new diagnosis retroactively. The final administrator page displays only fixed stage/code labels, not provider descriptions, tokens or authorization codes. Report only that red diagnostic line.
+
+- `DROPBOX_CLIENT_REJECTED`: privately verify App key and App secret are from the same Dropbox app and were saved as runtime secrets without extra whitespace.
+- `DROPBOX_GRANT_REJECTED`: restart Connect Dropbox; do not reuse an earlier callback/code. Check the exact registered redirect URI.
+- `DROPBOX_SCOPE_REQUIRED`: enable/save the four required permissions and reconnect. An explicitly reduced scope is rejected. A valid OAuth response may omit the scope field when unchanged, which is now accepted per [RFC 6749 section 5.1](https://www.rfc-editor.org/rfc/rfc6749#section-5.1).
+- `DROPBOX_HTTP_400`, `DROPBOX_HTTP_401`, or similar: report the accompanying fixed stage (token exchange/account check/app-folder check). Do not paste raw provider responses.
+- `DROPBOX_INTERNAL_FAILED` at saving the connection: report the label; do not reset D1 or rotate working sharing keys.
+
+An example diagnostic is `Dropbox authorization failed at token exchange (DROPBOX_CLIENT_REJECTED).` This is illustrative, not a diagnosis of the owner's original failure. Live provider access has not been independently confirmed.

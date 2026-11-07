@@ -1,3 +1,4 @@
+import { dropboxFailureHint } from '../lib/dropboxDiagnostics';
 import { useEffect, useRef, useState } from 'react';
 import { readBoundedBytes, shareDownloadError } from '../lib/sharedWorkspace';
 interface Status { available: boolean; enabled: boolean; status: string; accountName: string | null; folderId: string | null; folderName: string | null }
@@ -42,7 +43,7 @@ export default function DropboxConnectionPanel({ adminPassword }: { adminPasswor
     {status && <p className="text-sm">Status: {status.status}{status.accountName ? ` · ${status.accountName}` : ''}</p>}
     {status?.folderName && <p className="break-words text-sm">Upload folder: {status.folderName || status.folderId}</p>}
     {status && !status.enabled && <p className="text-sm">Complete the Dropbox runtime secrets and migration 0006 using the test setup guide.</p>}
-    {new URLSearchParams(window.location.search).get('dropbox') === 'failed' && <p role="alert" className="text-sm text-red-700">Dropbox authorization was not completed. Check app settings, the original account and folder permissions, then reconnect.</p>}
+    {status?.status !== 'connected' && dropboxFailureHint(window.location.search) && <p role="alert" className="text-sm text-red-700">{dropboxFailureHint(window.location.search)}</p>}
     <p className="text-sm">The transfer test creates and removes a small text file in the app folder.</p>
     <div className="flex flex-wrap gap-2">
       <button disabled={busy} onClick={() => void run()} className="min-h-11 rounded border px-3 text-sm">Refresh status</button>
