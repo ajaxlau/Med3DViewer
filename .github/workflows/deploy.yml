@@ -60,3 +60,8 @@ jobs:
         run: |
           npm run check:shares:beta
           npm run check:shares:beta:cleanup
+
+      - name: Validate isolated Box-test packaging without publishing
+        env:
+          SHARES_DB_ID: 33333333-3333-4333-8333-333333333333
+        run: node scripts/share-cloudflare.mjs box-test check

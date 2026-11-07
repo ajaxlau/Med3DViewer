@@ -4,23 +4,23 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-// Owner-confirmed test/beta resource IDs are non-secret and tier-specific.
+// Owner-confirmed test/beta/Box-test resource IDs are non-secret and tier-specific.
 // Main has no defaults: production requires a separate, explicit setup.
 export function deploymentSettings(target, env = process.env) {
-  const defaults = ['test', 'beta'].includes(target)
+  const defaults = ['test', 'beta', 'box-test'].includes(target)
     ? JSON.parse(readFileSync(new URL(`../config/shares.${target}.json`, import.meta.url), 'utf8'))
     : {};
   return { ...defaults, ...env };
 }
 
 export function shareConfig(target, env = process.env, root = process.cwd()) {
-  if (!['test', 'beta', 'main'].includes(target)) throw new Error('Target must be test, beta, or main.');
+  if (!['test', 'beta', 'main', 'box-test'].includes(target)) throw new Error('Target must be test, beta, main, or box-test.');
   const database_name = `med3dviewer-shares-${target}`;
   if (env.SHARES_DB_NAME !== database_name) throw new Error(`Set SHARES_DB_NAME=${database_name} for this target.`);
   if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(env.SHARES_DB_ID || '') || /^0+-/.test(env.SHARES_DB_ID)) {
     throw new Error('Set SHARES_DB_ID to the non-secret database UUID from Cloudflare D1.');
   }
-  for (const other of ['test', 'beta']) {
+  for (const other of ['test', 'beta', 'box-test']) {
     const knownDatabase = deploymentSettings(other, {}).SHARES_DB_ID;
     if (target !== other && env.SHARES_DB_ID.toLowerCase() === knownDatabase.toLowerCase()) {
       throw new Error(`The ${other} database UUID cannot be used for ${target}. Create a separate database.`);
@@ -29,9 +29,9 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
   if (env.SHARES_RESOURCE_TIER !== target) throw new Error(`Set SHARES_RESOURCE_TIER=${target}; resource tiers cannot be reused implicitly.`);
   /** @type {Record<string, any>} */
   const config = {
-    name: target === 'test' ? 'ntec3dpo-m3dv-sharing-test' : 'ntec3dpo-m3dv',
+    name: target === 'box-test' ? 'ntec3dpo-m3dv-box-test' : target === 'test' ? 'ntec3dpo-m3dv-sharing-test' : 'ntec3dpo-m3dv',
     // Publish a public address for the dedicated test Worker explicitly.
-    ...(target === 'test' ? { workers_dev: true } : {}),
+    ...(['test', 'box-test'].includes(target) ? { workers_dev: true } : {}),
     main: resolve(root, 'worker/entry.ts'),
     compatibility_date: '2026-10-03',
     assets: { directory: resolve(root, 'dist'), binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: ['/api/shares', '/api/shares/*', '/s/*'] },
@@ -62,6 +62,9 @@ export function cleanupConfig(env = process.env, root = process.cwd()) {
 }
 
 export function requirePublishingBranch(target, action, branch) {
+  if (target === 'box-test' && ['deploy', 'migrate'].includes(action) && branch !== 'codex/box-workspace-upload-preview') {
+    throw new Error('Publish or migrate box-test only from the codex/box-workspace-upload-preview branch.');
+  }
   if ((target === 'beta' && ['preview', 'cleanup'].includes(action)) || (target === 'main' && action === 'deploy')) {
     if (branch !== target) throw new Error(`Publish ${target} only from the ${target} branch; current branch is ${branch || 'unknown'}.`);
   }

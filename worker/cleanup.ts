@@ -8,7 +8,7 @@ export interface CleanupEnvironment {
 // The immutable database marker prevents a copied binding/config from touching
 // another environment, including from a separately deployed beta cleanup job.
 export async function databaseScopeMatches(env: CleanupEnvironment): Promise<boolean> {
-  if (!env.SHARES_DB || !['test','beta','main'].includes(env.SHARES_ENVIRONMENT || '')) return false;
+  if (!env.SHARES_DB || !['test','beta','main','box-test'].includes(env.SHARES_ENVIRONMENT || '')) return false;
   try {
     const row = await env.SHARES_DB.prepare('SELECT scope FROM share_environment WHERE id=1').first<{ scope: string }>();
     return row?.scope === env.SHARES_ENVIRONMENT;

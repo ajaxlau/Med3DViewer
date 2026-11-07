@@ -66,7 +66,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...protectedHeaders, 'Content-Type': 'application/json; charset=utf-8' } });
 }
 function ready(env: ShareEnvironment): boolean {
-  return env.SHARES_ENABLED === 'true' && ['test','beta','main'].includes(env.SHARES_ENVIRONMENT || '') && !!env.SHARES_DB
+  return env.SHARES_ENABLED === 'true' && ['test','beta','main','box-test'].includes(env.SHARES_ENVIRONMENT || '') && !!env.SHARES_DB
     && typeof env.SHARES_CREATE_KEY === 'string' && env.SHARES_CREATE_KEY.length >= 32 && env.SHARES_CREATE_KEY.length <= 256
     && typeof env.SHARES_ENCRYPTION_KEY === 'string' && env.SHARES_ENCRYPTION_KEY.length >= 32 && env.SHARES_ENCRYPTION_KEY.length <= 256;
 }

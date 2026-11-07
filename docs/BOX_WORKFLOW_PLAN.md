@@ -1,6 +1,6 @@
 # Department Box uploads and model-aware workspace revisions
 
-Status: **draft for owner review; implementation is not started by this plan**.
+Status: **implementation authorized; isolated deployment groundwork is in progress**. See the [Box test setup guide](BOX_TEST_SETUP.md). Box connection, upload and model-aware revision features remain to be implemented and tested before promotion.
 
 Review baseline: beta commit [`9dec4176`](https://github.com/ajaxlau/Med3DViewer/commit/9dec4176cb95f92e2818e73200c6c198c55814ad), including merged PR #12. This document extends the existing [platform improvement plan](PERFORMANCE_PLAN.md) with the upload/model-version workflow discussed with the owner. The previous limits on unrelated features, memory/GPU use, security and Slicer correctness still apply. Direct uploads are a newly requested addition, not an existing capability.
 
@@ -25,7 +25,7 @@ Use a regular test Worker to simplify runtime-secret administration and schedule
 
 Current deployment scripts/runtime only recognize `test`, `beta`, and `main`; the scope-marker table also constrains its values. Implementation must explicitly add `box-test` to validation and isolate its database UUID, bindings, branches, signing/encryption context and migration target. Do not rename an existing scope marker or reuse another environment's D1 database. Root Wrangler must retain the existing application Worker identity and default sharing-disabled behavior; generate a separate Box-test profile.
 
-No Box application, Worker, database, runtime secret or folder is created by this documentation-only change. Database UUID and app settings must be supplied/verified at the relevant implementation milestone.
+The initial implementation checkpoint adds the Box-test deployment profile and environment-scope migration. Database UUID and app settings must be supplied/verified at the relevant implementation milestone; code changes alone do not provision live resources.
 
 ## 2. Agreed user workflow
 
@@ -128,7 +128,7 @@ Do not silently carry measurements or mesh-index references onto a different mod
 | F — final testing | Isolated live test deployment and owner review | Real iOS/Android and desktop memory/GPU measurements; representative multi-mesh 3MF and Slicer round trips; Box disconnect/deletion/outage; real scheduled metadata cleanup |
 | G — promotion | Reviewed PR into beta, then separate main release | Owner acceptance, green exact-commit checks, separate provider resources/keys per environment and rollback verification |
 
-Implement through a new draft PR and test Worker first. Feature flags default off until the required environment is configured. Do not merge to beta or deploy main as part of drafting this plan.
+Implement through a new draft PR and test Worker first. Feature flags default off until the required environment is configured. Keep this work in draft PR #13 until the Box workflow is implemented and accepted; no beta merge or main deployment is included in this setup checkpoint.
 
 ## 8. Owner decisions and manual setup
 
