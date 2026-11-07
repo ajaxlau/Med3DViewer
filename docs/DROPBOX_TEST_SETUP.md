@@ -167,3 +167,12 @@ Start a new Connect Dropbox attempt; an old failure URL cannot acquire a new dia
 - `DROPBOX_INTERNAL_FAILED` at saving the connection: report the label; do not reset D1 or rotate working sharing keys.
 
 An example diagnostic is `Dropbox authorization failed at token exchange (DROPBOX_CLIENT_REJECTED).` This is illustrative, not a diagnosis of the owner's original failure. Live provider access has not been independently confirmed.
+
+
+## Confirmed Workers transport compatibility fix
+
+A real Cloudflare `workerd` probe reproduced the owner's token-exchange failure before any provider request: `redirect: 'error'` is not supported by Workers. The Dropbox provider now uses `redirect: 'manual'` and explicitly rejects every redirect before any follow-up request, preventing credential forwarding. Timeouts also get a separate fixed diagnostic code.
+
+The CI runtime suite now exercises the actual OAuth callback/token exchange/account/folder sequence using native Workers fetch, synthetic D1 fixtures and an in-process provider. It checks encrypted persistence on success and rejects a redirect to an unexpected host. The fixture has no real credentials or external network access. SQLite tests continue to cover storage semantics separately; live provider acceptance is still required.
+
+Update and deploy using the three commands in the diagnostics section above, then start a **fresh Connect Dropbox** attempt. No database migration, account reset or key rotation is needed for this fix. The prior generic `DROPBOX_REQUEST_FAILED` screenshot is consistent with this reproduced runtime error; it does not establish invalid Dropbox credentials.

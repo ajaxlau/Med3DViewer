@@ -73,7 +73,11 @@ async function provider(url: string, init: RequestInit, upstream: ProviderFetch,
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15_000);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    const response = await upstream(url, { ...init, redirect: 'error', signal: controller.signal });
+    const response = await upstream(url, { ...init, redirect: 'manual', signal: controller.signal });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new DropboxError(502, 'DROPBOX_REDIRECT_BLOCKED', 'Dropbox returned an unexpected redirect. No credentials were forwarded.');
+    }
     // Read bounded error bodies only to select fixed diagnostic codes.
     // Raw provider text is never returned, logged or stored.
     reader = response.body?.getReader();
@@ -95,7 +99,7 @@ async function provider(url: string, init: RequestInit, upstream: ProviderFetch,
   } catch (error) {
     await reader?.cancel().catch(() => {});
     if (error instanceof DropboxError) throw error;
-    throw new DropboxError(502, 'DROPBOX_REQUEST_FAILED', 'Dropbox could not complete the request. Try reconnecting.');
+    throw new DropboxError(502, controller.signal.aborted ? 'DROPBOX_TIMEOUT' : 'DROPBOX_REQUEST_FAILED', controller.signal.aborted ? 'Dropbox did not respond before the request deadline.' : 'Dropbox could not complete the request. Try reconnecting.');
   } finally { clearTimeout(timer); }
 }
 async function tokens(env: Env, grant: Record<string, string>, upstream: ProviderFetch): Promise<Credentials> {

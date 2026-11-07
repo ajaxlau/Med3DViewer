@@ -12,6 +12,8 @@ const hints: Record<string, string> = {
   DROPBOX_TOKEN_INVALID: 'Dropbox returned credentials the platform could not validate.',
   DROPBOX_ACCOUNT_MISMATCH: 'Reconnect the original Dropbox account.',
   DROPBOX_FOLDER_PERMISSION: 'Check the Dropbox app-folder permissions.',
+  DROPBOX_REDIRECT_BLOCKED: 'Dropbox returned an unexpected redirect; the platform did not forward credentials.',
+  DROPBOX_TIMEOUT: 'Dropbox did not respond before the request deadline. Try again later.',
   DROPBOX_REQUEST_FAILED: 'Dropbox could not complete the request. Try again later.',
   DROPBOX_RESPONSE_INVALID: 'Dropbox returned an unexpected response.',
   DROPBOX_CONNECTION_CHANGED: 'Another connection action interrupted this attempt. Start again.',

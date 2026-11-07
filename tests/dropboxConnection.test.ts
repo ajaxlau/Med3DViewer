@@ -25,7 +25,7 @@ function fixture() {
   const files = new Map<string, Uint8Array>(); let badDownload = false, failCleanup = false;
   const upstream = async (input: any, init: RequestInit) => {
     calls++;
-    const url = String(input); assert.equal(init.redirect, 'error');
+    const url = String(input); assert.equal(init.redirect, 'manual');
     if(providerFailure && url.endsWith(providerFailure.path)) return new Response(providerFailure.body,{status:providerFailure.status});
     if (url.endsWith('/oauth2/token')) {
       assert.equal(init.method, 'POST');
