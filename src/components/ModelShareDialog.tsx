@@ -20,9 +20,10 @@ export function ModelShareDialog({onClose}:{onClose:()=>void}) {
   const operation=useRef<AbortController|null>(null);
   const feedbackTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   let sourceToken:string|undefined;
-  if(loadedUrl){const source=new URL(loadedUrl,window.location.origin);if(source.origin===window.location.origin)sourceToken=/^\/api\/shares\/([a-f0-9]{64})\/model\.(?:stl|3mf|glb)$/.exec(source.pathname)?.[1];}
+  if(loadedUrl){const source=new URL(loadedUrl,window.location.origin);if(source.origin===window.location.origin)sourceToken=/^\/api\/shares\/([a-f0-9]{64})\/(?:revisions\/[1-9][0-9]*\/|models\/[a-f0-9]{64}\/)?model\.(?:stl|3mf|glb)$/.exec(source.pathname)?.[1];}
   const existingWorkspace=!!sourceToken&&manager?.sharedWorkspaceIncludesPlanning!==false;
   const identity=manager?.loadedModelIdentity||'';
+  const sourceAsset=manager?.cloudModelAsset?.requestId===manager?.modelLoadState?.requestId?manager.cloudModelAsset.id:undefined;
   const modelPhase=manager?.modelLoadState?.phase;
   const activeLink=workspace&&canShare?workspaceLink:modelLink?.url||'';
   useEffect(()=>{
@@ -39,7 +40,7 @@ export function ModelShareDialog({onClose}:{onClose:()=>void}) {
     // Metadata-only provisioning finishes once and survives closing/reopening the dialog.
     void modelShareLinks(manager).get(`${loadedUrl}\n${identity}`,async()=>{
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(new Error('The sharing request timed out.')),20_000);
-      try{return await createProtectedShare({...(sourceToken?{sourceShareToken:sourceToken}:{sourceUrl:loadedUrl}),workspace:modelOnlySnapshot(manager),modelIdentity:identity,includeWorkspace:false},'',controller.signal);}finally{clearTimeout(timer);}
+      try{return await createProtectedShare({...(sourceToken?{sourceShareToken:sourceToken,...(sourceAsset?{selectedAssetId:sourceAsset}:{})}:sourceAsset?{sourceAssetId:sourceAsset}:{sourceUrl:loadedUrl}),workspace:modelOnlySnapshot(manager),modelIdentity:identity,includeWorkspace:false},'',controller.signal);}finally{clearTimeout(timer);}
     }).then(link=>{if(current)setModelLink(link);}).catch(reason=>{if(current)setError(reason instanceof Error?reason.message:'The link could not be prepared.');}).finally(()=>{if(current)setPreparing(false);});
     return()=>{current=false;};
   },[manager,loadedUrl,identity,modelPhase,isEmpty,retry]);
@@ -53,7 +54,7 @@ export function ModelShareDialog({onClose}:{onClose:()=>void}) {
       if(existingWorkspace){const url=await shareWorkspaceWithSession(sourceToken!,controller.signal);if(!controller.signal.aborted)setWorkspaceLink(url);return;}
       if(!name.trim())throw new Error('Enter a workspace name.');
       if(manager?.loadedModelShareable===false)throw new Error('Export a self-contained STL, 3MF or GLB before sharing this workspace.');
-      const result=await createProtectedShare({...(sourceToken?{sourceShareToken:sourceToken}:{sourceUrl:loadedUrl!}),workspace:manager.exportShareWorkspace(),modelIdentity:identity,includeWorkspace:true,label:name.trim(),expiresAt:workspaceExpiry(expiry)},'',controller.signal);
+      const result=await createProtectedShare({...(sourceToken?{sourceShareToken:sourceToken,...(sourceAsset?{selectedAssetId:sourceAsset}:{})}:sourceAsset?{sourceAssetId:sourceAsset}:{sourceUrl:loadedUrl!}),workspace:manager.exportShareWorkspace(),modelIdentity:identity,includeWorkspace:true,label:name.trim(),expiresAt:workspaceExpiry(expiry)},'',controller.signal);
       if(!controller.signal.aborted)setWorkspaceLink(result.url);
     }catch(reason){if(!controller.signal.aborted){if(reason instanceof Error&&reason.name==='LoginRequiredError')auth.requireLogin();else setError(reason instanceof Error?reason.message:'The workspace link could not be created.');}}
     finally{if(!controller.signal.aborted)setBusy(false);}

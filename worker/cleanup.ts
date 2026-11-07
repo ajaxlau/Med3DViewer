@@ -8,7 +8,7 @@ export interface CleanupEnvironment {
 // The immutable database marker prevents a copied binding/config from touching
 // another environment, including from a separately deployed beta cleanup job.
 export async function databaseScopeMatches(env: CleanupEnvironment): Promise<boolean> {
-  if (!env.SHARES_DB || !['test','beta','main'].includes(env.SHARES_ENVIRONMENT || '')) return false;
+  if (!env.SHARES_DB || !['test','beta','main','box-test'].includes(env.SHARES_ENVIRONMENT || '')) return false;
   try {
     const row = await env.SHARES_DB.prepare('SELECT scope FROM share_environment WHERE id=1').first<{ scope: string }>();
     return row?.scope === env.SHARES_ENVIRONMENT;
@@ -27,6 +27,8 @@ export async function cleanupExpiredShares(env: CleanupEnvironment, timestamp = 
       AND NOT EXISTS(SELECT 1 FROM shares parent WHERE parent.token_hash=substr(child.owner_ref,12,64) AND parent.expires_at>? AND parent.revoked_at IS NULL) LIMIT 100)`).bind(timestamp).run();
     if((result.meta?.changes||0)<100)break;
   }
+  const schema=await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>().catch(()=>null);
+  if((schema?.version||0)>=7)await env.SHARES_DB!.prepare('DELETE FROM model_uploads WHERE id IN (SELECT id FROM model_uploads WHERE expires_at<=? LIMIT 500)').bind(timestamp).run();
   await env.SHARES_DB!.prepare('DELETE FROM share_rate_limits WHERE bucket IN (SELECT bucket FROM share_rate_limits WHERE expires_at<=? LIMIT 1000)').bind(timestamp).run();
 
 }

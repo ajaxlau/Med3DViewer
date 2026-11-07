@@ -172,7 +172,7 @@ export async function sniffModelFile(file: Blob & { name?: string }): Promise<vo
     throw new ModelLoadException('FORMAT_MISMATCH', 'This file does not contain a valid GLB header.', 'Re-export the model as GLB.');
   }
   if (['zip', '3mf'].includes(extension) && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
-    throw new ModelLoadException('FORMAT_MISMATCH', 'This file does not contain a valid ZIP header.', 'Recreate the planning bundle.');
+    throw new ModelLoadException('FORMAT_MISMATCH', extension === '3mf' ? 'This .3mf file is not a 3MF archive.' : 'This file does not contain a valid ZIP header.', extension === '3mf' ? 'Use Download on the original file host, then select the downloaded .3mf. If it still fails, export the model again as 3MF.' : 'Recreate the planning bundle.');
   }
   if (extension === 'stl' && file.size >= 84) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

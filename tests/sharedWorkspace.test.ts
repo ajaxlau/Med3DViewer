@@ -232,3 +232,12 @@ test('save responses reject malformed history versions and retain legacy revisio
     await assert.rejects(saveProtectedWorkspace(token,{workspace,modelIdentity:'b'.repeat(64),revision:1},new AbortController().signal),/invalid revision metadata/);
   }
 });
+
+test('a saved model revision fetches its version-bound geometry using the Dropbox block fingerprint',async t=>{
+  const {modelIdentity}=await import('../src/lib/modelIdentity');const bytes=new TextEncoder().encode('synthetic revision geometry').buffer as ArrayBuffer;
+  const identity=await modelIdentity(bytes,'dropbox-block-sha256'),requests:string[]=[];
+  t.mock.method(globalThis,'fetch',async(url:string|URL)=>{requests.push(String(url));return requests.length===1?Response.json({...metadata(),workspaceVersion:2,modelIdentity:identity,modelIdentityKind:'dropbox-block-sha256',modelAssetId:'d'.repeat(64),modelUrl:`/api/shares/${token}/revisions/2/model.stl`}):new Response(bytes);});
+  const result=await loadSharedModel(token,{version:2,signal:new AbortController().signal,capabilities:null,safeMode:true,origin});
+  assert.equal(result.metadata.modelAssetId,'d'.repeat(64));assert.deepEqual(requests,[`${origin}/api/shares/${token}/revisions/2`,`${origin}/api/shares/${token}/revisions/2/model.stl`]);
+  assert.throws(()=>validateShareResponse({...metadata(),modelIdentityKind:'untrusted'},token,origin));
+});

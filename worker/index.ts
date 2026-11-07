@@ -1,3 +1,7 @@
+import { assetById, requireOwnedAsset, requireAttachedAsset, handleModelUploads, streamAsset, ModelAssetError, type ModelAsset } from './modelUploads';
+import type { ModelIdentityKind } from '../src/lib/modelIdentity';
+import { handleDropboxConnection, maintainDropboxConnection, type DropboxEnvironment } from './dropboxConnection';
+import { handleBoxConnection, maintainBoxConnection, type BoxEnvironment } from './boxConnection';
 import { createUserSession, readUserSession, requireUserPermission, revokeUserSession, publicUserSession, userSessionCookie, SessionError, type SharingIdentity } from './userSessions';
 import { validateSharedWorkspace } from '../src/lib/planningData';
 import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, modelShareKey, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
@@ -14,7 +18,7 @@ export interface ShareDatabase {
   prepare(sql: string): D1Statement;
   batch(statements: D1Statement[]): Promise<D1Result[]>;
 }
-export interface ShareEnvironment {
+export interface ShareEnvironment extends BoxEnvironment, DropboxEnvironment {
   ASSETS?: { fetch(request: Request): Promise<Response> };
   SHARES_DB?: ShareDatabase;
   SHARES_ENABLED?: string;
@@ -25,6 +29,8 @@ export interface ShareEnvironment {
   SHARES_DAILY_CREATE_LIMIT?: string;
 }
 interface ShareRecord {
+  model_asset_id?: string | null;
+  identity_kind?: ModelIdentityKind;
   token_hash: string;
   source_ciphertext: string;
   model_extension: string;
@@ -66,7 +72,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...protectedHeaders, 'Content-Type': 'application/json; charset=utf-8' } });
 }
 function ready(env: ShareEnvironment): boolean {
-  return env.SHARES_ENABLED === 'true' && ['test','beta','main'].includes(env.SHARES_ENVIRONMENT || '') && !!env.SHARES_DB
+  return env.SHARES_ENABLED === 'true' && ['test','beta','main','box-test'].includes(env.SHARES_ENVIRONMENT || '') && !!env.SHARES_DB
     && typeof env.SHARES_CREATE_KEY === 'string' && env.SHARES_CREATE_KEY.length >= 32 && env.SHARES_CREATE_KEY.length <= 256
     && typeof env.SHARES_ENCRYPTION_KEY === 'string' && env.SHARES_ENCRYPTION_KEY.length >= 32 && env.SHARES_ENCRYPTION_KEY.length <= 256;
 }
@@ -87,6 +93,21 @@ async function historySchemaReady(env: ShareEnvironment): Promise<boolean> {
 }
 async function requireHistorySchema(env: ShareEnvironment): Promise<void> {
   if (!await historySchemaReady(env)) throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0003 before using public workspace history.');
+}
+async function modelSchemaReady(env:ShareEnvironment):Promise<boolean> {
+  try {return ((await env.SHARES_DB!.prepare('SELECT version FROM share_schema_version WHERE id=1').first<{version:number}>())?.version||0)>=7;}catch{return false;}
+}
+function assetSource(asset:ModelAsset):URL { return new URL(`dropbox-asset://${asset.id}/model.${asset.extension}`); }
+function modelMetadata(record:ShareRecord,token:string,version?:number) {
+ return {workspace:validateSharedWorkspace(JSON.parse(record.workspace_json)),modelIdentity:record.model_identity,modelIdentityKind:record.identity_kind||'sha256',modelAssetId:record.model_asset_id||null,
+ modelUrl:`/api/shares/${token}/${version!==undefined?`revisions/${version}/`:''}model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),workspaceName:record.label||'',role:record.role,revision:record.revision||1,
+ historyEnabled:true,includeWorkspace:!!record.include_workspace,editingEnabled:!!record.editing_enabled,workspaceVersion:version??record.workspace_version??1};
+}
+async function recordForVersion(record:ShareRecord,env:ShareEnvironment,version:number):Promise<ShareRecord> {
+ const row=await env.SHARES_DB!.prepare('SELECT * FROM share_revisions WHERE token_hash=? AND version=?').bind(record.token_hash,version).first<any>();
+ if(!row){if(version===(record.workspace_version||1))return record;throw new ShareError(404,'REVISION_UNAVAILABLE','This version is unavailable or has been removed.');}
+ const asset=row.model_asset_id?await assetById(env,row.model_asset_id):null;
+ return {...record,workspace_json:row.workspace_json,source_ciphertext:row.source_ciphertext,model_identity:row.model_identity,identity_kind:row.identity_kind,model_asset_id:row.model_asset_id,model_extension:asset?.extension||row.model_extension||record.model_extension};
 }
 function hex(buffer: ArrayBuffer | Uint8Array): string {
   return Array.from(new Uint8Array(buffer as ArrayBuffer), value => value.toString(16).padStart(2, '0')).join('');
@@ -204,7 +225,7 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const history = await historySchemaReady(env);
   let owner = `creator:${env.SHARES_ENVIRONMENT}`;
   const body = await readJson(request) as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'sourceShareToken', 'modelIdentity','label','includeWorkspace','sharingUsername','sharingPassword','expiresAt'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['workspace', 'sourceUrl', 'sourceShareToken', 'sourceAssetId', 'selectedAssetId', 'modelIdentity','label','includeWorkspace','sharingUsername','sharingPassword','expiresAt'].includes(key))) throw new ShareError(400, 'INVALID_WORKSPACE', 'The share request is invalid.');
   const includeWorkspace = body.includeWorkspace !== false;
   if (body.includeWorkspace !== undefined && typeof body.includeWorkspace !== 'boolean') throw new ShareError(400,'REQUEST_INVALID','Choose model-only or workspace sharing.');
   if(history && includeWorkspace) owner=`sharer:${(await authorizeWorkspaceSharing(request,env,now,body.sharingUsername,body.sharingPassword)).id}`;
@@ -214,18 +235,33 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
   const label = workspaceLabel(includeWorkspace?body.label??'':'');
   if(history && includeWorkspace && !label)throw new ShareError(400,'LABEL_INVALID','Enter a workspace name.');
   const editable = await editableSchemaReady(env);
-  if((body.sourceUrl!==undefined)===(body.sourceShareToken!==undefined))throw new ShareError(400,'SOURCE_INVALID','Provide one model source.');
+  if([body.sourceUrl,body.sourceShareToken,body.sourceAssetId].filter(value=>value!==undefined).length!==1)throw new ShareError(400,'SOURCE_INVALID','Provide one model source.');
+  if(body.selectedAssetId!==undefined&&body.sourceShareToken===undefined)throw new ShareError(400,'SOURCE_INVALID','A workspace source is required for this model.');
   let sourceReference=body.sourceUrl;
+  let sourceAsset:ModelAsset|null=null;
+  if(body.sourceAssetId!==undefined){
+   if(!await modelSchemaReady(env))throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0007 before sharing uploaded models.');
+   sourceAsset=await requireOwnedAsset(request,env,String(body.sourceAssetId),now);
+   if(body.modelIdentity!==sourceAsset.content_hash)throw new ShareError(409,'MODEL_CHANGED','The model identity changed.');
+  }
   let parentHash:string|undefined,parentExpiry:number|undefined;
   if(body.sourceShareToken!==undefined) {
     if(typeof body.sourceShareToken!=='string'||!TOKEN.test(body.sourceShareToken))throw new ShareError(400,'SOURCE_INVALID','A valid existing model link is required.');
-    const original=await loadRecord(body.sourceShareToken,env,now);
+    let original=await loadRecord(body.sourceShareToken,env,now);
+    if(body.selectedAssetId!==undefined){
+      const asset=await requireAttachedAsset(env,original.token_hash,String(body.selectedAssetId));
+      original={...original,model_asset_id:asset.id,model_identity:asset.content_hash,model_extension:asset.extension,source_ciphertext:await encryptSource(assetSource(asset).href,original.token_hash,env)};
+    } else if(body.modelIdentity!==original.model_identity&&await modelSchemaReady(env)){
+      const old=await env.SHARES_DB!.prepare('SELECT version FROM share_revisions WHERE token_hash=? AND model_identity=? ORDER BY version DESC LIMIT 1').bind(original.token_hash,body.modelIdentity).first<{version:number}>();
+      if(old)original=await recordForVersion(original,env,old.version);
+    }
     if(!includeWorkspace){parentHash=/^model-from:([a-f0-9]{64}):[a-f0-9]{64}$/.exec(original.owner_ref)?.[1]||original.token_hash;parentExpiry=original.expires_at;}
+    if(original.model_asset_id)sourceAsset=await assetById(env,original.model_asset_id);
     if(body.modelIdentity!==original.model_identity)throw new ShareError(409,'MODEL_CHANGED','The model identity does not match this source.');
     try{sourceReference=await decryptSource(original.source_ciphertext,original.token_hash,env);}
     catch{throw new ShareError(502,'SOURCE_DECRYPTION_FAILED','The existing model source could not be recovered.');}
   }
-  const source = validateSource(sourceReference, env, new URL(request.url).origin, true);
+  const source = sourceAsset?assetSource(sourceAsset):validateSource(sourceReference, env, new URL(request.url).origin, true);
   const ext = extension(source);
   if (typeof body.modelIdentity !== 'string' || !TOKEN.test(body.modelIdentity)) throw new ShareError(400, 'MODEL_IDENTITY_INVALID', 'A model SHA-256 fingerprint is required.');
   let workspace: unknown;
@@ -267,6 +303,8 @@ async function createShare(request: Request, env: ShareEnvironment, now: number)
     env.SHARES_DB!.prepare(`INSERT INTO share_rate_limits(bucket,count,expires_at)
       SELECT ?,1,? WHERE EXISTS(SELECT 1 FROM shares WHERE token_hash=?)
       ON CONFLICT(bucket) DO UPDATE SET count=count+1`).bind(daily,now + 2 * DAY,hash),
+    ...(sourceAsset ? [env.SHARES_DB!.prepare("UPDATE shares SET model_asset_id=?,identity_kind='dropbox-block-sha256' WHERE token_hash=?").bind(sourceAsset.id,hash),
+      ...(includeWorkspace?[env.SHARES_DB!.prepare('INSERT INTO workspace_models(token_hash,asset_id) SELECT token_hash,? FROM shares WHERE token_hash=?').bind(sourceAsset.id,hash)]:[])]:[]),
     ...(editable ? [env.SHARES_DB!.prepare('UPDATE shares SET label=?,updated_at=?,view_token_ciphertext=? WHERE token_hash=?').bind(label,now,viewCiphertext,hash)] : []),
     ...(history ? [env.SHARES_DB!.prepare('UPDATE shares SET include_workspace=?,editing_enabled=? WHERE token_hash=?').bind(includeWorkspace?1:0,includeWorkspace?1:0,hash)] : []),
   ]);
@@ -486,7 +524,63 @@ async function authorizePublicShare(request: Request, record: ShareRecord, env: 
   }
   return json({url:new URL(`/s/${token}`,request.url).href});
 }
+async function saveModelHistory(request: Request, record: ShareRecord, env: ShareEnvironment, now: number): Promise<Response> {
+  if(!record.include_workspace || !record.editing_enabled)throw new ShareError(403,'VIEW_ONLY','Editing is disabled for this public workspace.');
+  await limitedAttempts(request,env,now,`save:${record.token_hash}`,30);
+  const body=await readJson(request) as any;requestFields(body,['workspace','modelIdentity','revision','author','modelAssetId']);
+  revision(body.revision); // The client's base may be old: each explicit save appends its own snapshot.
+  const author=revisionAuthor(body.author);
+  if(!author)throw new ShareError(400,'AUTHOR_INVALID','Enter a revision name of 1–80 characters.');
+  let selected=record;
+  if(body.modelAssetId!==undefined&&body.modelAssetId!==null){
+    const asset=await requireAttachedAsset(env,record.token_hash,body.modelAssetId);
+    selected={...record,model_asset_id:asset.id,model_identity:asset.content_hash,identity_kind:'dropbox-block-sha256',model_extension:asset.extension,source_ciphertext:await encryptSource(assetSource(asset).href,record.token_hash,env)};
+  } else if(body.modelIdentity!==record.model_identity) {
+    // A stale recipient may explicitly save a retained historical model.
+    const historical=await env.SHARES_DB!.prepare('SELECT * FROM share_revisions WHERE token_hash=? AND model_identity=? ORDER BY version DESC LIMIT 1').bind(record.token_hash,body.modelIdentity).first<any>();
+    if(!historical)throw new ShareError(409,'MODEL_CHANGED','Reload the model before saving.');
+    selected=await recordForVersion(record,env,historical.version);
+  }
+  if(body.modelIdentity!==selected.model_identity)throw new ShareError(409,'MODEL_CHANGED','The selected model identity does not match.');
+  let snapshot:string;
+  try{snapshot=JSON.stringify(validateSharedWorkspace(body.workspace));}catch{throw new ShareError(400,'INVALID_WORKSPACE','The workspace contains unsupported model/planning state.');}
+  const bytes=encoder.encode(snapshot).length,saveId=randomToken();
+  const valid=`token_hash=? AND include_workspace=1 AND editing_enabled=1 AND auth_epoch=? AND expires_at>? AND revoked_at IS NULL`;
+  const args=[record.token_hash,record.auth_epoch,now];
+  // D1 serializes this entire batch. Allocate from the current row inside the
+  // transaction, never from the recipient's potentially stale revision number.
+  // A monotonic server timestamp also orders saves that arrive in the same ms.
+  const results=await env.SHARES_DB!.batch([
+    env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id,model_asset_id,model_identity,identity_kind,source_ciphertext,model_extension)
+      SELECT token_hash,workspace_version,workspace_json,length(CAST(workspace_json AS BLOB)),'Previous saved state',COALESCE(updated_at,created_at),'baseline',model_asset_id,model_identity,identity_kind,source_ciphertext,model_extension
+      FROM shares WHERE ${valid} AND NOT EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=?)
+      AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+length(CAST(workspace_json AS BLOB))+?<=?`)
+      .bind(...args,record.token_hash,bytes,HISTORY_BYTE_LIMIT),
+    env.SHARES_DB!.prepare(`INSERT INTO share_revisions(token_hash,version,workspace_json,byte_count,author,saved_at,save_id,model_asset_id,model_identity,identity_kind,source_ciphertext,model_extension)
+      SELECT token_hash,workspace_version+1,?,?,?,MAX(?,COALESCE(updated_at,created_at)+1),?,?,?,?,?,? FROM shares WHERE ${valid}
+      AND EXISTS(SELECT 1 FROM share_revisions h WHERE h.token_hash=shares.token_hash AND h.version=shares.workspace_version)
+      AND COALESCE((SELECT SUM(byte_count) FROM share_revisions),0)+?<=?`)
+      .bind(snapshot,bytes,author,now,saveId,selected.model_asset_id||null,selected.model_identity,selected.identity_kind||'sha256',selected.source_ciphertext,selected.model_extension,...args,bytes,HISTORY_BYTE_LIMIT),
+    env.SHARES_DB!.prepare(`UPDATE shares SET workspace_json=?,model_asset_id=?,model_identity=?,identity_kind=?,source_ciphertext=?,model_extension=?,workspace_version=workspace_version+1,revision=revision+1,
+      updated_at=(SELECT saved_at FROM share_revisions WHERE token_hash=? AND save_id=?)
+      WHERE ${valid} AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)
+      RETURNING revision,workspace_version,updated_at,expires_at`)
+      .bind(snapshot,selected.model_asset_id||null,selected.model_identity,selected.identity_kind||'sha256',selected.source_ciphertext,selected.model_extension,record.token_hash,saveId,...args,record.token_hash,saveId),
+    env.SHARES_DB!.prepare(`DELETE FROM share_revisions WHERE token_hash=? AND version<=(SELECT workspace_version FROM shares WHERE token_hash=?)-?
+      AND EXISTS(SELECT 1 FROM share_revisions WHERE token_hash=? AND save_id=?)`).bind(record.token_hash,record.token_hash,HISTORY_VERSION_LIMIT,record.token_hash,saveId),
+  ]);
+  if(!results[2]?.meta?.changes) {
+    const current=await adminRecord(record.token_hash,env,now);
+    if(!current.editing_enabled || current.auth_epoch!==record.auth_epoch)throw new ShareError(403,'VIEW_ONLY','Workspace permissions changed. Reload before saving.');
+    throw new ShareError(507,'HISTORY_FULL','Workspace history storage is full. Contact the administrator. Your changes are still on this device.');
+  }
+  // RETURNING captures this save's allocation before another batch can advance
+  // the current row or prune it. A follow-up SELECT could report a different save.
+  const saved=results[2].results?.[0] as {revision:number;workspace_version:number;updated_at:number;expires_at:number};
+  return json({revision:saved.revision,workspaceVersion:saved.workspace_version,updatedAt:new Date(saved.updated_at).toISOString(),expiresAt:new Date(saved.expires_at).toISOString()});
+}
 async function saveHistory(request: Request, record: ShareRecord, env: ShareEnvironment, now: number): Promise<Response> {
+  if(await modelSchemaReady(env))return saveModelHistory(request,record,env,now);
   if(!record.include_workspace || !record.editing_enabled)throw new ShareError(403,'VIEW_ONLY','Editing is disabled for this public workspace.');
   await limitedAttempts(request,env,now,`save:${record.token_hash}`,30);
   const body=await readJson(request) as any;requestFields(body,['workspace','modelIdentity','revision','author']);
@@ -532,10 +626,11 @@ async function saveHistory(request: Request, record: ShareRecord, env: ShareEnvi
   const saved=results[2].results?.[0] as {revision:number;workspace_version:number;updated_at:number;expires_at:number};
   return json({revision:saved.revision,workspaceVersion:saved.workspace_version,updatedAt:new Date(saved.updated_at).toISOString(),expiresAt:new Date(saved.expires_at).toISOString()});
 }
-async function revisionHistory(record: ShareRecord, env: ShareEnvironment, version?: number): Promise<Response> {
+async function revisionHistory(record: ShareRecord, env: ShareEnvironment, version?: number, token?:string): Promise<Response> {
   if(!record.include_workspace)throw new ShareError(404,'HISTORY_UNAVAILABLE','Model-only links have no workspace history.');
   const currentVersion=record.workspace_version||1;
   if(version!==undefined) {
+    if(token&&await modelSchemaReady(env))return json({...modelMetadata(await recordForVersion(record,env,version),token,version),version,currentVersion});
     const row=await env.SHARES_DB!.prepare('SELECT workspace_json,author,saved_at FROM share_revisions WHERE token_hash=? AND version=?').bind(record.token_hash,version).first<{workspace_json:string;author:string;saved_at:number}>();
     const snapshot=row?.workspace_json || (version===currentVersion?record.workspace_json:null);
     if(!snapshot)throw new ShareError(404,'REVISION_UNAVAILABLE','This version is unavailable or has been removed from history.');
@@ -565,6 +660,7 @@ function safeModelHeaders(upstream: Response, ext: string): Headers {
   return headers;
 }
 async function streamModel(request: Request, record: ShareRecord, env: ShareEnvironment, upstreamFetch: typeof fetch): Promise<Response> {
+  if(record.model_asset_id){const asset=await assetById(env,record.model_asset_id);if(asset.content_hash!==record.model_identity||asset.extension!==record.model_extension)throw new ShareError(409,'MODEL_CHANGED','The stored model changed.');return streamAsset(asset,request,env,upstreamFetch);}
   const controller = new AbortController();
   const cancelled = () => controller.abort();
   const requestSignal = request.signal;
@@ -656,7 +752,17 @@ export function createShareWorker(dependencies: Dependencies = {}) {
       if (!url.pathname.startsWith('/api/shares')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found',{ status: 404 });
       try {
         if (request.headers.has('Origin') && request.headers.get('Origin') !== url.origin) throw new ShareError(403,'ORIGIN_INVALID','Cross-origin share requests are not allowed.');
-        if (url.search && url.pathname !== '/api/shares/admin') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
+        if (url.search && url.pathname !== '/api/shares/admin' && url.pathname !== '/api/shares/box/callback' && url.pathname !== '/api/shares/dropbox/callback') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
+        if (url.pathname === '/api/shares/dropbox/callback' || /^\/api\/shares\/admin\/dropbox(?:\/(?:connect|check|transfer-test|disconnect))?$/.test(url.pathname)) {
+          if (url.pathname !== '/api/shares/dropbox/callback') await authenticate(request, env);
+          if (!await environmentReady(env)) throw new ShareError(503, 'SHARING_DISABLED', 'Sharing is not configured.');
+          return await handleDropboxConnection(request, env, upstreamFetch, now());
+        }
+        if (url.pathname === '/api/shares/box/callback' || /^\/api\/shares\/admin\/box(?:\/(?:connect|check|disconnect))?$/.test(url.pathname)) {
+          if (url.pathname !== '/api/shares/box/callback' && url.pathname !== '/api/shares/dropbox/callback') await authenticate(request, env);
+          if (!await environmentReady(env)) throw new ShareError(503, 'SHARING_DISABLED', 'Sharing is not configured.');
+          return await handleBoxConnection(request, env, upstreamFetch, now());
+        }
         if (url.pathname === '/api/shares/config' && request.method === 'GET') {
           const enabled = await environmentReady(env);
           return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),...(await historySchemaReady(env)?{historyEnabled:true}:{}),formats:['stl','3mf','glb']} : {enabled:false});
@@ -710,6 +816,29 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           await env.SHARES_DB!.batch(body.ids.map((id:string)=>env.SHARES_DB!.prepare('UPDATE shares SET revoked_at=?,revision=revision+1,auth_epoch=auth_epoch+1 WHERE token_hash=? AND revoked_at IS NULL').bind(now(),id)));
           return json({revoked:body.ids.length});
         }
+        if(/^\/api\/shares\/uploads(?:\/[a-f0-9]{64}(?:\/complete)?)?$/.test(url.pathname)||/^\/api\/shares\/[a-f0-9]{64}\/models$/.test(url.pathname)) {
+          if(!await environmentReady(env))throw new ShareError(503,'SHARING_DISABLED','Sharing is not configured.');
+          return await handleModelUploads(request,env,upstreamFetch,now());
+        }
+        const assetRoute=/^\/api\/shares\/(?:models\/([a-f0-9]{64})|([a-f0-9]{64})\/models\/([a-f0-9]{64}))\/model\.(stl|3mf)$/.exec(url.pathname);
+        if(assetRoute){
+          if(!['GET','HEAD'].includes(request.method))throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+          if(!await environmentReady(env)||!await modelSchemaReady(env))throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0007.');
+          let asset:ModelAsset;
+          if(assetRoute[1])asset=await requireOwnedAsset(request,env,assetRoute[1],now());
+          else{const record=await loadRecord(assetRoute[2],env,now());if(!record.include_workspace)throw new ShareError(403,'MODEL_UNAVAILABLE','Workspace unavailable.');asset=await requireAttachedAsset(env,record.token_hash,assetRoute[3]);await rateLimit(request,env,now());}
+          if(asset.extension!==assetRoute[4])throw new ShareError(404,'MODEL_UNAVAILABLE','Model unavailable.');
+          return await streamAsset(asset,request,env,upstreamFetch);
+        }
+        const revisionModel=/^\/api\/shares\/([a-f0-9]{64})\/revisions\/([1-9][0-9]{0,9})\/model\.(stl|3mf|glb)$/.exec(url.pathname);
+        if(revisionModel){
+          if(!['GET','HEAD'].includes(request.method))throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
+          if(!await environmentReady(env)||!await modelSchemaReady(env))throw new ShareError(503,'UPGRADE_REQUIRED','Apply migration 0007.');
+          const record=await loadRecord(revisionModel[1],env,now());
+          const historical=await recordForVersion(record,env,Number(revisionModel[2]));
+          if(historical.model_extension!==revisionModel[3])throw new ShareError(404,'MODEL_UNAVAILABLE','Model unavailable.');
+          await rateLimit(request,env,now());return await streamModel(request,historical,env,upstreamFetch);
+        }
         const historyRoute=/^\/api\/shares\/([a-f0-9]{64})\/(share-link|revisions)(?:\/([1-9][0-9]{0,9}))?$/.exec(url.pathname);
         if(historyRoute) {
           if((historyRoute[2]==='share-link' && (request.method!=='POST'||historyRoute[3]))||(historyRoute[2]==='revisions'&&request.method!=='GET'))throw new ShareError(405,'METHOD_NOT_ALLOWED','This method is not supported.');
@@ -718,7 +847,7 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           const record=await loadRecord(historyRoute[1],env,now());
           await rateLimit(request,env,now());
           if(historyRoute[2]==='share-link')return await authorizePublicShare(request,record,env,now(),historyRoute[1]);
-          return await revisionHistory(record,env,historyRoute[3]?Number(historyRoute[3]):undefined);
+          return await revisionHistory(record,env,historyRoute[3]?Number(historyRoute[3]):undefined,historyRoute[1]);
         }
         const admin = /^\/api\/shares\/admin(?:\/([a-f0-9]{64})(?:\/(edit-link))?)?$/.exec(url.pathname);
         if (admin) {
@@ -778,15 +907,16 @@ export function createShareWorker(dependencies: Dependencies = {}) {
           const viewToken=await decryptSource(record.view_token_ciphertext,`view-token:${record.token_hash}`,env);
           if(TOKEN.test(viewToken)&&await hashToken(viewToken)===record.token_hash)viewUrl=new URL(`/s/${viewToken}`,request.url).href;
         } catch { /* A missing old view address does not grant or remove edit access. */ }
+        if(await modelSchemaReady(env))return json({...modelMetadata(record,token,record.workspace_version||1),...(viewUrl?{viewUrl}:{})});
         return json({ workspace,modelIdentity:record.model_identity,modelUrl:`/api/shares/${token}/model.${record.model_extension}`,expiresAt:new Date(record.expires_at).toISOString(),workspaceName:record.label||'',role:record.role,revision:record.revision??1,...(record.auth_epoch!==undefined?{historyEnabled:true,includeWorkspace:!!record.include_workspace,editingEnabled:!!record.editing_enabled,workspaceVersion:record.workspace_version??1}:{}),...(viewUrl?{viewUrl}:{}) });
       } catch (error) {
-        if (error instanceof ShareError || error instanceof SessionError) return json({ error: { code:error.code,message:error.message } },error.status);
+        if (error instanceof ShareError || error instanceof SessionError || error instanceof ModelAssetError) return json({ error: { code:error.code,message:error.message } },error.status);
         // Never echo SQL, secrets, user annotations or upstream URL/error bodies.
         return json({ error: { code:'SHARING_UNAVAILABLE',message:'Protected sharing is temporarily unavailable.' } },503);
       }
     },
     async scheduled(_controller: unknown, env: ShareEnvironment): Promise<void> {
-      await cleanupExpiredShares(env,now());
+      await cleanupExpiredShares(env,now()); await maintainBoxConnection(env,upstreamFetch,now()); await maintainDropboxConnection(env,upstreamFetch,now());
     },
   };
 }

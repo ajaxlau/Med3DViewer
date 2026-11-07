@@ -1,3 +1,4 @@
+import { useUserSession } from '../context/UserSessionContext';
 import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { useViewer } from '../context/ViewerContext';
 import { X, SlidersHorizontal, Download, Trash2, Crosshair, BoxSelect, Ruler, Compass, Plus, Spline, Eye, EyeOff, Folder, FolderPlus, ChevronDown, ChevronUp, ChevronRight, FolderOpen, Copy, Upload, Save, GripHorizontal, Waypoints, MapPin, Palette, Droplets, Play, Pause, Sparkles, Navigation, MessageSquarePlus, Layers } from 'lucide-react';
@@ -13,6 +14,7 @@ const DEFAULT_CYLINDER_EXTENSION = 20;
 const DEFAULT_CURVE_THICKNESS = 0.2;
 
 export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactNode }) {
+  const {user}=useUserSession();
   const { 
     activeModal, setActiveModal, 
     planningMode, setPlanningMode, 
@@ -610,7 +612,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
                 Project IO
               </span>
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-200/70 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
-                ZIP / STL
+                {user?'ZIP / STL':'JSON / STL'}
               </span>
             </div>
 
@@ -726,12 +728,12 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
 
                             {/* Save Button */}
                             <button 
-                                onClick={() => viewerManager?.exportAllPlanningObjectsZip()} 
+                                onClick={() => viewerManager?.exportAllPlanningObjectsZip(user?'zip':'json')} 
                                 className="text-[10px] flex items-center gap-1.5 font-bold text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 uppercase tracking-wider transition" 
-                                title="Save Analytic Data"
+                                title={user?"Save Analytic Data":"Export analytics JSON"}
                             >
                                 <Save size={13} />
-                                Save
+                                {user?'Save':'JSON'}
                             </button>
                         </div>
                     )}
@@ -964,6 +966,7 @@ export function PlanningMenu({ workspaceControls }: { workspaceControls?: ReactN
 }
 
 function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: any, key?: any }) {
+  const {user}=useUserSession();
   const { planningGroups = [], resnappingAnnotationId, setResnappingAnnotationId, setPlanningMode } = useViewer();
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [isOpacitySliderOpen, setIsOpacitySliderOpen] = useState(false);
@@ -1280,7 +1283,7 @@ function PlanningObjectItem({ obj, viewerManager }: { obj: any, viewerManager: a
                       {obj.visible === false ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                   {(obj.type !== 'measurement' && obj.type !== 'angle' && obj.type !== 'annotation') && (
-                      <button onClick={() => viewerManager.exportPlanningObjectSTL(obj.id)} className="p-1.5 text-zinc-500 hover:text-blue-500 dark:text-zinc-400 dark:hover:text-blue-400 rounded hover:bg-white dark:hover:bg-zinc-800 transition" title="Download STL">
+                      <button onClick={() => viewerManager.exportPlanningObjectSTL(obj.id,!user)} className="p-1.5 text-zinc-500 hover:text-blue-500 dark:text-zinc-400 dark:hover:text-blue-400 rounded hover:bg-white dark:hover:bg-zinc-800 transition" title="Download STL">
                           <Download size={14} />
                       </button>
                   )}

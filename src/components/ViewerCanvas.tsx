@@ -6,7 +6,7 @@ import { SplineClippingHUD } from './SplineClippingHUD';
 import { GpuHardwareCard } from './GpuHardwareCard';
 import { Tooltip } from './Tooltip';
 
-export function ViewerCanvas() {
+export function ViewerCanvas({onWorkspaceModels}:{onWorkspaceModels?:()=>void}) {
   const { 
     setContainerRef, setRulerRefs, isEmpty, status, loadingProgress, rulersVisible, 
     viewerManager, filename, setActiveModal,
@@ -377,6 +377,7 @@ export function ViewerCanvas() {
                 >
                   Browse Files
                 </button>
+                {onWorkspaceModels&&<button type="button" className="ml-3 min-h-11 px-3 text-xs text-blue-600 dark:text-blue-400 underline" onClick={event=>{event.stopPropagation();onWorkspaceModels();}}>Workspace Revision</button>}
               </div>
 
               {/* Separator between Handler and GPU Hardware & Acceleration */}

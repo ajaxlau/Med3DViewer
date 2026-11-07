@@ -50,3 +50,8 @@ test('protected GLB metadata permits embedded resources and refuses external buf
   assert.equal((await validateLocalFiles([external],profile)).protectedShareable,false,'ordinary companion loading must remain available');
   await assert.rejects(validateLocalFiles([external],profile,{requireSelfContained:true}),/embedded/);
 });
+
+test('a mislabeled 3MF download reports model-specific guidance rather than planning ZIP instructions',async()=>{
+ const file=new File(['<!doctype html><title>Download page</title>'],'synthetic.3mf');
+ await assert.rejects(validateLocalFiles([file],profile),(error:any)=>error.code==='FORMAT_MISMATCH'&&/3MF archive/.test(error.message)&&!/planning bundle/.test(error.workaround||''));
+});

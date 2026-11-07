@@ -1,3 +1,4 @@
+import { modelIdentity, type ModelIdentityKind } from './modelIdentity';
 import { getDeviceLoadProfile } from './modelLoading';
 import { validateSharedWorkspace, type SharedPlanningWorkspace } from './planningData';
 import type { GpuCapabilities } from './gpuDetection';
@@ -49,6 +50,8 @@ const shareDownloadErrors: Record<string, string> = {
 export interface SharedWorkspaceResponse {
   workspace: SharedPlanningWorkspace;
   modelIdentity: string;
+  modelIdentityKind?: ModelIdentityKind;
+  modelAssetId?: string | null;
   modelUrl: string;
   expiresAt: string;
   role: 'view' | 'edit';
@@ -75,7 +78,7 @@ export function protectedModelPath(token: string, candidate: unknown, origin: st
   if (!TOKEN.test(token) || typeof candidate !== 'string') throw new Error('The shared model reference is invalid.');
   const url = new URL(candidate, origin);
   if (url.origin !== origin || url.search || url.hash || url.username || url.password
-    || !new RegExp(`^/api/shares/${token}/model\\.(stl|3mf|glb)$`).test(url.pathname)) {
+    || !new RegExp(`^/api/shares/${token}/(?:revisions/[1-9][0-9]{0,9}/)?model\\.(stl|3mf|glb)$`).test(url.pathname)) {
     throw new Error('The shared model reference is invalid.');
   }
   return url.href;
@@ -142,7 +145,10 @@ export function validateShareResponse(value: unknown, token: string, origin: str
   const role = data.role ?? 'view';
   const revision = data.revision ?? 1;
   if (!['view','edit'].includes(role) || !Number.isSafeInteger(revision) || revision < 1 || revision > 2_147_483_646) throw new Error('The shared workspace access state is invalid.');
+  if(data.modelIdentityKind!==undefined&&!['sha256','dropbox-block-sha256'].includes(data.modelIdentityKind))throw new Error('Unsupported model identity.');
+  if(data.modelAssetId!==undefined&&data.modelAssetId!==null&&!IDENTITY.test(data.modelAssetId))throw new Error('Invalid model reference.');
   return {
+    ...(data.modelIdentityKind?{modelIdentityKind:data.modelIdentityKind}:{}),...(data.modelAssetId?{modelAssetId:data.modelAssetId}:{}),
     workspace: validateSharedWorkspace(data.workspace),
     modelIdentity: data.modelIdentity!,
     modelUrl: protectedModelPath(token, data.modelUrl, origin),
@@ -168,24 +174,26 @@ export async function shareDownloadError(response: Response, signal: AbortSignal
   return new Error(code ? `${shareDownloadErrors[code]} (${code})` : `The shared model could not be downloaded. Try again or ask its owner to check the link. (HTTP ${response.status})`);
 }
 
+export async function loadSharedWorkspaceMetadata(token:string,options:{signal:AbortSignal;origin?:string;version?:number}):Promise<SharedWorkspaceResponse>{
+  if(!TOKEN.test(token))throw new Error('This share address is invalid.');
+  const origin=options.origin??window.location.origin;
+  const response=await fetch(new URL(`/api/shares/${token}${options.version!==undefined?`/revisions/${validVersion(options.version)}`:''}`,origin),{signal:options.signal,credentials:'omit',cache:'no-store',redirect:'error'});
+  if(!response.ok)throw await shareDownloadError(response,options.signal);
+  const bytes=await readBoundedBytes(response,METADATA_LIMIT,options.signal);
+  try{return validateShareResponse(JSON.parse(new TextDecoder().decode(bytes)),token,origin);}catch{throw new Error('This shared workspace is invalid, expired, or unsupported. Ask its owner to create a new link.');}
+}
 export async function loadSharedModel(
   token: string,
-  options: { signal: AbortSignal; capabilities: GpuCapabilities | null; safeMode: boolean; origin?: string; onProgress?: (received: number, total: number | null) => void }
+  options: { signal: AbortSignal; capabilities: GpuCapabilities | null; safeMode: boolean; origin?: string; version?:number; metadata?:SharedWorkspaceResponse; onProgress?: (received: number, total: number | null) => void }
 ): Promise<{ metadata: SharedWorkspaceResponse; file: File }> {
-  if (!TOKEN.test(token)) throw new Error('This share address is invalid.');
-  const origin = options.origin ?? window.location.origin;
-  const response = await fetch(new URL(`/api/shares/${token}`, origin), { signal: options.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' });
-  if (!response.ok) throw await shareDownloadError(response, options.signal);
-  const bytes = await readBoundedBytes(response, METADATA_LIMIT, options.signal);
-  let metadata: SharedWorkspaceResponse;
-  try { metadata = validateShareResponse(JSON.parse(new TextDecoder().decode(bytes)), token, origin); }
-  catch { throw new Error('This shared workspace is invalid, expired, or unsupported. Ask its owner to create a new link.'); }
+  const origin=options.origin??window.location.origin;
+  const metadata=options.metadata?validateShareResponse(options.metadata,token,origin):await loadSharedWorkspaceMetadata(token,options);
   const profile = getDeviceLoadProfile(options.capabilities, options.safeMode);
   const model = await fetch(metadata.modelUrl, { signal: options.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' });
   if (!model.ok) throw await shareDownloadError(model, options.signal);
   const modelBytes = await readBoundedBytes(model, profile.hardLimitBytes, options.signal, options.onProgress);
   abortIfNeeded(options.signal);
-  if (await sha256Hex(modelBytes) !== metadata.modelIdentity) {
+  if (await modelIdentity(modelBytes,metadata.modelIdentityKind,options.signal) !== metadata.modelIdentity) {
     throw new Error('The source model has changed. Saved planning data was not applied. Ask its owner for a new link.');
   }
   abortIfNeeded(options.signal);
@@ -193,14 +201,14 @@ export async function loadSharedModel(
   return { metadata, file: new File([modelBytes], `shared-model.${extension}`, { type: 'application/octet-stream' }) };
 }
 
-export async function createProtectedShare(input: { sourceUrl?: string; sourceShareToken?: string; workspace: unknown; modelIdentity: string; label?: string; includeWorkspace?: boolean; sharingUsername?: string; expiresAt?: string }, sharingPassword: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
+export async function createProtectedShare(input: { sourceUrl?: string; sourceShareToken?: string; sourceAssetId?:string; selectedAssetId?:string; workspace: unknown; modelIdentity: string; label?: string; includeWorkspace?: boolean; sharingUsername?: string; expiresAt?: string }, sharingPassword: string, signal: AbortSignal): Promise<{ url: string; token: string; expiresAt: string }> {
   if (!IDENTITY.test(input.modelIdentity)) throw new Error('Reload this model from its original URL before creating a protected share.');
   if (input.includeWorkspace !== false && input.sharingUsername !== undefined && (!input.sharingUsername || sharingPassword.length < 12 || sharingPassword.length>128)) throw new Error('Enter your assigned sharing username and password.');
   const workspace = validateSharedWorkspace(input.workspace);
   const response = await fetch('/api/shares', {
-    method: 'POST', credentials: input.includeWorkspace===false?'omit':'same-origin', cache: 'no-store', redirect: 'error', signal,
+    method: 'POST', credentials: input.includeWorkspace===false&&!input.sourceAssetId?'omit':'same-origin', cache: 'no-store', redirect: 'error', signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...(input.sourceShareToken?{sourceShareToken:input.sourceShareToken}:{sourceUrl:input.sourceUrl}), workspace, modelIdentity: input.modelIdentity, ...(input.label !== undefined ? {label:input.label} : {}),...(input.includeWorkspace !== undefined?{includeWorkspace:input.includeWorkspace}:{}),...(input.includeWorkspace!==false&&input.sharingUsername!==undefined?{sharingUsername:input.sharingUsername,sharingPassword}:{}),...(input.expiresAt!==undefined?{expiresAt:input.expiresAt}:{}) })
+    body: JSON.stringify({ ...(input.sourceShareToken?{sourceShareToken:input.sourceShareToken}:input.sourceAssetId?{sourceAssetId:input.sourceAssetId}:{sourceUrl:input.sourceUrl}), workspace, modelIdentity: input.modelIdentity, ...(input.selectedAssetId?{selectedAssetId:input.selectedAssetId}:{}), ...(input.label !== undefined ? {label:input.label} : {}),...(input.includeWorkspace !== undefined?{includeWorkspace:input.includeWorkspace}:{}),...(input.includeWorkspace!==false&&input.sharingUsername!==undefined?{sharingUsername:input.sharingUsername,sharingPassword}:{}),...(input.expiresAt!==undefined?{expiresAt:input.expiresAt}:{}) })
   });
   if (!response.ok) {
     const error=await shareDownloadError(response,signal);
@@ -230,7 +238,7 @@ export async function requestEditWorkspaceLink(path: string, password: string, s
   return protectedWorkspaceUrl(data.url);
 }
 
-export async function saveProtectedWorkspace(token: string, data: {workspace:unknown;modelIdentity:string;revision:number;author?:string}, signal: AbortSignal, editSession?:string): Promise<{revision:number;updatedAt:string;expiresAt:string;workspaceVersion?:number}> {
+export async function saveProtectedWorkspace(token: string, data: {workspace:unknown;modelIdentity:string;revision:number;author?:string;modelAssetId?:string|null}, signal: AbortSignal, editSession?:string): Promise<{revision:number;updatedAt:string;expiresAt:string;workspaceVersion?:number}> {
   if (!TOKEN.test(token) || !IDENTITY.test(data.modelIdentity) || !Number.isSafeInteger(data.revision) || data.revision < 1) throw new Error('The shared workspace save state is invalid.');
   const workspace = validateSharedWorkspace(data.workspace);
   const response = await fetch(`/api/shares/${token}`,{method:'PUT',credentials:'omit',cache:'no-store',redirect:'error',signal,headers:{'Content-Type':'application/json',...(editSession?{Authorization:`Bearer ${editSession}`}:{})},body:JSON.stringify({...data,workspace})});

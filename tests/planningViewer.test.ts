@@ -135,3 +135,17 @@ test('planning ZIP assigns stable unique asset filenames and omits redundant emb
     assert.ok(metadata.objects.every((item: any) => item.fileDataURL === undefined));
   } finally { URL.createObjectURL = oldURL; }
 });
+
+test('local JSON export emits one Slicer-compatible document without generating STL copies or a ZIP',async()=>{
+  const manager:any=Object.create(ViewerManager.prototype),downloads:any[]=[];
+  const previousWindow=globalThis.window,previousDocument=globalThis.document,create=URL.createObjectURL;
+  Object.defineProperty(globalThis,'window',{configurable:true,value:{THREE:{Matrix4:class{toArray(){return [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1];}}}}});
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{createElement(){const link:any={click(){downloads.push({name:link.download,url:link.href});}};return link;}}});
+  let exported:Blob|undefined;
+  URL.createObjectURL=(blob:Blob)=>{exported=blob;return'blob:synthetic';};
+  Object.assign(manager,{planningObjects:[{id:'local-point',type:'custom',name:'Local object',fileDataURL:'must-not-be-embedded'}],planningGroups:[],getModelRoot:()=>null,recordProceduralPlanningObject:()=>undefined,
+    generateSTLString(){throw new Error('JSON export must not allocate STL geometry');},
+    generateSlicerMarkupsJson(_objects:any,_name:any,metadata:any){assert.equal(metadata.objects[0].fileDataURL,undefined);return JSON.stringify({markups:[],appMetaData:metadata});}});
+  try{await manager.exportAllPlanningObjectsZip('json');assert.equal(downloads.length,1);assert.equal(downloads[0].name,'All_Planning.mrk.json');const data=JSON.parse(await exported!.text());assert.equal(data.appMetaData.objects[0].fileName,'local-point.stl');assert.equal(data.appMetaData.coordinateSystem.units,'millimeters (mm)');}
+  finally{URL.createObjectURL=create;Object.defineProperty(globalThis,'window',{configurable:true,value:previousWindow});Object.defineProperty(globalThis,'document',{configurable:true,value:previousDocument});}
+});
