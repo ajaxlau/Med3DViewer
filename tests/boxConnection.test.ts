@@ -19,11 +19,13 @@ function fixture() {
   }; }, async batch(statements: D1Statement[]) { const result = []; db.exec('BEGIN'); try { for (const statement of statements) result.push(await statement.run()); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; } } };
   const env: ShareEnvironment = { SHARES_DB: adapter, SHARES_ENABLED: 'true', SHARES_ENVIRONMENT: 'box-test', SHARES_CREATE_KEY: admin, SHARES_ENCRYPTION_KEY: 'b'.repeat(64), BOX_ENABLED: 'true', BOX_ORIGIN: origin, BOX_UPLOAD_FOLDER_ID: folder, BOX_CLIENT_ID: 'synthetic-client-id', BOX_CLIENT_SECRET: 'synthetic-client-secret', BOX_CREDENTIALS_KEY: 'c'.repeat(64) };
   let clock = Date.UTC(2026,10,7), calls = 0, account = '12345', upload = true;
+  let tokenHook: (() => Promise<void>) | null = null;
   const upstream = async (input: any, init: RequestInit) => {
     calls++;
     const url = String(input); assert.equal(init.redirect, 'error');
     if (url.endsWith('/oauth2/token')) {
       assert.equal(init.method, 'POST');
+      if (tokenHook) { const hook = tokenHook; tokenHook = null; await hook(); }
       const body = new URLSearchParams(String(init.body));
       assert.equal(body.get('client_secret'), env.BOX_CLIENT_SECRET);
       return new Response(JSON.stringify(token(body.get('grant_type') === 'refresh_token' ? '-rotated' : '')));
@@ -46,7 +48,7 @@ function fixture() {
   }
   const callback = (s: {state:string;cookie:string}, extra = '&code=synthetic-code') => request('/api/shares/box/callback?state=' + s.state + extra,'GET',false,s.cookie);
   async function connect() { const s = await start(); const response = await worker.fetch(callback(s),env); assert.equal(response.headers.get('Location'),'/admin/shares?box=connected'); return s; }
-  return { db,env,worker,request,start,callback,connect,upstream:upstream as typeof fetch,get calls(){return calls;},advance(ms:number){clock+=ms;},get now(){return clock;},setAccount(id:string){account=id;},denyUpload(){upload=false;} };
+  return { db,env,worker,request,start,callback,connect,upstream:upstream as typeof fetch,get calls(){return calls;},advance(ms:number){clock+=ms;},get now(){return clock;},setAccount(id:string){account=id;},denyUpload(){upload=false;},onToken(hook:()=>Promise<void>){tokenHook=hook;} };
 }
 test('Box administrator endpoints reject anonymous and cross-origin requests before provider access',async()=>{
   const f=fixture();try {
@@ -141,4 +143,18 @@ test('credential-key changes and folder changes stop access rather than using mi
     await f.connect();const count=f.calls;f.env.BOX_UPLOAD_FOLDER_ID='999';await assert.rejects(()=>boxAccessToken(f.env,f.upstream,f.now),/folder/);
     f.env.BOX_UPLOAD_FOLDER_ID=folder;f.env.BOX_CREDENTIALS_KEY='d'.repeat(64);await assert.rejects(()=>boxAccessToken(f.env,f.upstream,f.now),/credential configuration/);assert.equal(f.calls,count);
   }finally{f.db.close();}
+});
+
+test('disconnect during code exchange or refresh cannot resurrect saved credentials',async()=>{
+  for(const refresh of [false,true]){
+    const f=fixture();try {
+      if(refresh)await f.connect();
+      const pending=refresh?null:await f.start();
+      f.onToken(async()=>{assert.equal((await f.worker.fetch(f.request('/api/shares/admin/box/disconnect','POST'),f.env)).status,200);});
+      if(refresh){f.advance(3600_000);await assert.rejects(()=>boxAccessToken(f.env,f.upstream,f.now),/connection changed/);}
+      else assert.equal((await f.worker.fetch(f.callback(pending!),f.env)).headers.get('Location'),'/admin/shares?box=failed');
+      const row=f.db.prepare('SELECT status,credentials FROM box_connection').get() as any;
+      assert.equal(row.status,'disconnected');assert.equal(row.credentials,null);
+    }finally{f.db.close();}
+  }
 });
