@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { RotateCw } from 'lucide-react';
 import { SectionControls, SECTION_COLLAPSE_DELAY_MS, SECTION_EXPANSION_CLASS } from './SectionControls';
 import { shouldIgnoreHover } from '../lib/utils';
@@ -10,6 +10,9 @@ export interface SharedWorkspaceSession {
   role: 'view' | 'edit';
   revision: number;
   modelIdentity: string;
+  modelAssetId?: string|null;
+  localDraft?:boolean;
+  modelHistoryEnabled?:boolean;
   requestId: string;
   expiresAt: string;
   historyEnabled?: boolean;
@@ -18,9 +21,11 @@ export interface SharedWorkspaceSession {
   workspaceVersion?: number;
   workspaceName?: string;
 }
-export function SharedWorkspaceBar({ session, manager, onSaved }: {
+export function SharedWorkspaceBar({ session, manager, onSaved, onLoadRevision, modelControls }: {
   session: SharedWorkspaceSession;
   manager: ViewerManager;
+  modelControls?:ReactNode;
+  onLoadRevision?: (version:number,signal:AbortSignal)=>Promise<void>;
   onSaved: (revision: number, expiresAt: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -40,7 +45,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
   const authorInput = useRef<HTMLInputElement | null>(null);
   const detailsId = useId();
   const nameErrorId = useId();
-  const modelMatches = () => manager.modelLoadState.requestId === session.requestId && manager.modelLoadState.phase === 'ready' && manager.loadedModelIdentity === session.modelIdentity;
+  const modelMatches = () => manager.modelLoadState.requestId === session.requestId && manager.modelLoadState.phase === 'ready' && (session.localDraft||manager.loadedModelIdentity === session.modelIdentity);
   useEffect(() => {
     setAuthor(''); setNameRequired(false); setItems([]); setExpanded(false); setPinned(false); setOperation(null); setStatus(''); setFocusAuthor(false);
     setViewing(session.workspaceVersion || 1); setSelected(session.workspaceVersion || 1);
@@ -73,6 +78,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
     if (operation === 'save' || !Number.isSafeInteger(version)) return;
     setSelected(version);
     void run('load', async signal => {
+      if(onLoadRevision){await onLoadRevision(version,signal);if(!signal.aborted){setViewing(version);setSelected(version);}return;}
       const data = await loadWorkspaceVersion(session.token, version, session.modelIdentity, signal);
       if (signal.aborted || !modelMatches()) return;
       await manager.restoreShareWorkspace(data.workspace);
@@ -80,9 +86,9 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
       setViewing(version); onSaved(data.revision, session.expiresAt);
     }, true);
   };
-  if (!modelMatches()) return null;
+  if (!modelMatches()&&!modelControls) return null;
   const expired = Date.parse(session.expiresAt) <= Date.now();
-  const canSave = session.historyEnabled ? session.editingEnabled : session.role === 'edit';
+  const canSave = modelMatches()&&!session.localDraft&&(session.historyEnabled ? session.editingEnabled : session.role === 'edit');
   const field = 'mt-1 block min-h-11 w-full min-w-0 rounded border border-zinc-300 bg-white px-2 text-xs font-normal normal-case tracking-normal text-zinc-800 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100';
   if (session.includeWorkspace === false) return null;
   return <section ref={container} aria-label="Workspace controls" onMouseEnter={() => {
@@ -107,6 +113,8 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
     </div>
     <div id={detailsId} aria-hidden={!expanded} inert={!expanded} className={`${SECTION_EXPANSION_CLASS} ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'}`}>
     <div className="overflow-hidden"><div className="space-y-3 px-3 pb-3">
+      {modelControls}
+      {session.localDraft&&<p className="text-xs text-zinc-500">Local model only. Export JSON and STLs to keep your changes.</p>}
       {session.workspaceName && <p className="truncate text-xs" title={session.workspaceName}>{session.workspaceName}</p>}
       {session.historyEnabled && session.includeWorkspace && <>
         <div className="flex items-end gap-1">
@@ -128,7 +136,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
         }
         void run('save', async signal => {
           if (!modelMatches()) throw new Error('A different model is open. Reload this workspace before saving.');
-          const result = await saveProtectedWorkspace(session.token, { workspace: manager.exportShareWorkspace(), modelIdentity: session.modelIdentity, revision: session.revision, ...(session.historyEnabled ? { author } : {}) }, signal);
+          const result = await saveProtectedWorkspace(session.token, { workspace: manager.exportShareWorkspace(), modelIdentity: session.modelIdentity, ...(session.modelAssetId?{modelAssetId:session.modelAssetId}:{}), revision: session.revision, ...(session.historyEnabled ? { author } : {}) }, signal);
           if (signal.aborted || !modelMatches()) return;
           onSaved(result.revision, result.expiresAt);
           if (result.workspaceVersion) {
@@ -144,7 +152,7 @@ export function SharedWorkspaceBar({ session, manager, onSaved }: {
           }
         });
       }}>{operation === 'save' ? 'Saving…' : 'Save Workspace'}</button>}
-      {expired ? <p className="pt-2 text-xs text-zinc-500">Workspace unavailable.</p> : !canSave && <p className="text-xs text-zinc-500">View only</p>}
+      {expired ? <p className="pt-2 text-xs text-zinc-500">Workspace unavailable.</p> : !canSave && !session.localDraft && <p className="text-xs text-zinc-500">View only</p>}
       {operation === 'load' && <p role="status" className="pt-2 text-xs text-zinc-500">Loading revision…</p>}
       {status && <p role="status" className="pt-2 text-xs text-zinc-500 dark:text-zinc-400">{status}</p>}
     </div>

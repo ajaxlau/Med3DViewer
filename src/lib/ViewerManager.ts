@@ -5300,7 +5300,7 @@ Please open a file.`,
     }
     return null;
   }
-  exportPlanningObjectSTL(i) {
+  exportPlanningObjectSTL(i, stableFilename = false) {
     const r = this.planningObjects.find((d) => d.id === i);
     if (!r) return;
     const l = this.generateSTLString(r, !0);
@@ -5309,7 +5309,7 @@ Please open a file.`,
       s = URL.createObjectURL(u),
       c = document.createElement("a");
     c.href = s;
-    const f = (r.name || r.id).replace(/\.stl$/i, "");
+    const f = (stableFilename ? encodeURIComponent(r.id) : (r.name || r.id)).replace(/\.stl$/i, "");
     ((c.download = `${f}.stl`),
       c.click(),
       setTimeout(() => URL.revokeObjectURL(s), 1e3));
@@ -5697,14 +5697,14 @@ It contains both Slicer markup properties and the application's internal groupin
       throw error;
     } finally { this.planningStorageSuspended = false; }
   }
-  async exportAllPlanningObjectsZip() {
+  async exportAllPlanningObjectsZip(output:'zip'|'json'='zip') {
     if (this.planningObjects.length === 0) return;
-    const i = await loadZip(),
-      r = new i(),
+    const i = output==='json'?null:await loadZip(),
+      r = i?new i():null,
       l = [];
     this.planningObjects.forEach((x) => {
       var N, O, j, V, U, $, q, G, X, R, Z, S, P, H, I, de, te, D, M, B, A, Q, W;
-      const b = this.generateSTLString(x, !0);
+      const b = output==='json'?null:this.generateSTLString(x, !0);
       b && r.file(`${encodeURIComponent(x.id)}.stl`, b);
       const y = { ...x };
       (delete y.mesh,
@@ -5945,6 +5945,10 @@ It contains both Slicer markup properties and the application's internal groupin
         "All Planning Objects",
         u,
       );
+    if(output==='json'){
+      const blob=new Blob([s||JSON.stringify(u,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+      link.href=url;link.download='All_Planning.mrk.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
+    }
     (s && r.file("All_Planning.mrk.json", s),
       r.file("metadata.json", JSON.stringify(u, null, 2)),
       r.file(

@@ -254,3 +254,16 @@ export async function handleDropboxConnection(request: Request, env: Env, upstre
     return error instanceof DropboxError ? json({ error: { code: error.code, message: error.message } }, error.status) : json({ error: { code: 'DROPBOX_UNAVAILABLE', message: 'Dropbox connection is unavailable. Refresh the status or reconnect.' } }, 503);
   }
 }
+
+// Server-only byte transport. Callers choose a fixed route; no arbitrary host or
+// public URL can receive the department access token. Stream limits live in caller.
+export async function dropboxStorageFetch(env: ShareEnvironment, route: string, init: RequestInit, upstream: typeof fetch = fetch): Promise<Response> {
+  const content = ['upload_session/start','upload_session/append_v2','upload_session/finish','download'];
+  const rpc = ['get_metadata'];
+  if (!content.includes(route) && !rpc.includes(route)) throw new DropboxError(400, 'DROPBOX_REQUEST_FAILED', 'Unsupported storage operation.');
+  const access = await dropboxAccessToken(env, upstream);
+  const requestHeaders = new Headers(init.headers); requestHeaders.set('Authorization', `Bearer ${access}`);
+  const response = await upstream(`https://${content.includes(route) ? 'content' : 'api'}.dropboxapi.com/2/files/${route}`, { ...init, method: 'POST', headers: requestHeaders, redirect: 'manual' });
+  if (response.status >= 300 && response.status < 400) { await response.body?.cancel(); throw new DropboxError(502, 'DROPBOX_REDIRECT_BLOCKED', 'The storage request was redirected.'); }
+  return response;
+}

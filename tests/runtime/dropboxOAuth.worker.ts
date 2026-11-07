@@ -1,7 +1,9 @@
+import {dropboxStorageFetch} from '../../worker/dropboxConnection';
+import {streamAsset} from '../../worker/modelUploads';
 import { createShareWorker, type ShareDatabase, type ShareEnvironment } from '../../worker/index';
 const origin='https://ntec3dpo-m3dv-box-test.x-panda.workers.dev';
 function check(value:unknown,message:string):asserts value {if(!value)throw new Error(message);}
-async function exercise(redirect=false){
+async function exercise(redirect=false,storage=false){
  let row:any={epoch:0,status:'disconnected',account_id:null,credentials:null};
  let state:any=null;
  const database:ShareDatabase={prepare(sql){let values:any[]=[];return {
@@ -19,7 +21,7 @@ async function exercise(redirect=false){
   async run(){
    if(sql.startsWith('DELETE FROM dropbox_oauth_states'))state=null;
    else if(sql.startsWith('INSERT INTO dropbox_oauth_states'))state={state_hash:values[0],browser_hash:values[1],epoch:values[2],expires_at:values[3]};
-   else if(sql.startsWith("UPDATE dropbox_connection SET status='connected'"))row={...row,status:'connected',account_id:values[0],account_name:values[1],folder_id:values[2],folder_name:values[3],credentials:values[4]};
+   else if(sql.startsWith("UPDATE dropbox_connection SET status='connected'"))row={...row,status:'connected',account_id:values[0],account_name:values[1],folder_id:values[2],folder_name:values[3],credentials:values[4],access_expires_at:values[5],refresh_due_at:values[6]};
    else if(sql.startsWith("UPDATE dropbox_connection SET status='reconnect'"))row={...row,status:'reconnect',credentials:null};
    else throw new Error('Unexpected runtime fixture write');
    return {meta:{changes:1}};
@@ -35,7 +37,16 @@ async function exercise(redirect=false){
  const final=new URL(callback.headers.get('Location')!,origin);
  check(callback.status===303,'Runtime OAuth callback did not redirect');
  if(redirect){check(final.searchParams.get('reason')==='DROPBOX_REDIRECT_BLOCKED','Runtime did not block provider redirect');check(row.credentials===null,'Blocked redirect saved credentials');}
- else{check(final.searchParams.get('dropbox')==='connected','Runtime OAuth exchange/account/folder flow failed: '+final.search);check(typeof row.credentials==='string'&&!row.credentials.includes('synthetic-access'),'Runtime credentials were not encrypted');}
+ else{check(final.searchParams.get('dropbox')==='connected','Runtime OAuth exchange/account/folder flow failed: '+final.search);check(typeof row.credentials==='string'&&!row.credentials.includes('synthetic-access'),'Runtime credentials were not encrypted');
+  if(storage){
+   const headers={'Content-Type':'application/octet-stream','Dropbox-API-Arg':JSON.stringify({close:false})};
+   const started=await dropboxStorageFetch(env,'upload_session/start',{headers,body:new Uint8Array()});check((await started.json()as any).session_id==='native-session','Runtime upload start failed');
+   const appended=await dropboxStorageFetch(env,'upload_session/append_v2',{headers:{...headers,'Dropbox-API-Arg':JSON.stringify({cursor:{session_id:'native-session',offset:0},close:false})},body:new Uint8Array([1,2,3])});check(appended.ok,'Runtime chunk transport failed');await appended.body?.cancel();
+   const asset={id:'c'.repeat(64),owner_id:'d'.repeat(64),connection_epoch:row.epoch,filename:'model.stl',extension:'stl',size:3,content_hash:'e'.repeat(64),file_id:'id:native-file',file_rev:'abc',created_at:Date.now()};
+   const downloaded=await streamAsset(asset,new Request(origin+'/model.stl'),env,fetch);check(downloaded.status===200&&new Uint8Array(await downloaded.arrayBuffer()).join(',')==='1,2,3','Runtime private download failed');
+  }}
 }
 export const success={async test(){await exercise();}};
 export const redirect={async test(){await exercise(true);}};
+
+export const storage={async test(){await exercise(false,true);}};

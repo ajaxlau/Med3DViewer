@@ -20,7 +20,7 @@ Dropbox enforces the app's configured content-access type. The operator must con
 
 1. A logged-in, authorized platform user starts from an empty viewer and uploads an STL or self-contained multi-mesh 3MF, without pasting a storage URL or logging into Dropbox individually.
 2. Upload through bounded Worker streaming/chunks into the connected account's app folder. Show progress/cancel/retry and mark an asset ready only after provider completion and identity checks.
-3. Select an available uploaded model under **Workspace Model** in Visualization Tools, above mesh visibility. A multi-mesh 3MF is one selectable file; its individual meshes retain show/hide/opacity controls. Initially bind one model file per revision, not several independent files together.
+3. Select an available uploaded model inside **Workspace Revision** under Analytic Tools. A multi-mesh 3MF is one selectable file; its individual meshes retain show/hide/opacity controls. Initially bind one model file per revision, not several independent files together.
 4. Set analytics, objects and visualization state. Share through the existing legacy QR/copy/WhatsApp screen; only logged-in users see the workspace checkbox/name/expiry fields. Guest model-only sharing retains its existing layout.
 5. Explicitly click **Save Workspace** with a required Revision Name. Uploading, selecting or modifying a model must not publish a workspace revision automatically.
 6. Recipients need no Dropbox or platform login to open a protected workspace URL. When administrator editing permission is enabled, they may select already-attached models and explicitly save analytics/visibility/opacity changes. New uploads/asset attachment still require an authorized platform login.
@@ -32,7 +32,7 @@ D1 stores metadata only: provider/connection identity, immutable internal asset 
 
 Each new model upload creates a distinct file rather than overwriting the source of an older workspace revision. Native Dropbox version history is not the application's retention mechanism. Match the recorded file identity/revision when streaming; if it has changed or disappeared, fail clearly rather than apply analytics to different geometry. Bind download authorization to the selected saved revision to prevent latest-model/older-JSON races. Suppress stale asynchronous loads.
 
-Add asset/revision tables and compatible backfills in a later reviewed migration; migration 0006 does not implement these entities. Preserve existing URL-based Dropbox workspaces and imports/exports without downloading/copying their source models, changing fingerprints or extending expiry. Retain GLB/link loading already supported; the first direct-upload UI targets STL and 3MF.
+Migration **0007** adds the bounded upload ledger, private asset catalog, workspace memberships and immutable per-revision model references, with backfills for existing history. Migration 0006 remains unchanged. Preserve existing URL-based Dropbox workspaces and imports/exports without downloading/copying their source models, changing fingerprints or extending expiry. Retain GLB/link loading already supported; the first direct-upload UI targets STL and 3MF.
 
 Concurrent saves append distinct monotonically numbered revisions ordered by the server, with atomic publication of model identity and workspace JSON. Preserve current 256 KiB snapshots, 20-version retention and the 64 MiB history budget pending separate quota review. Never silently reuse or renumber older revisions.
 
@@ -56,12 +56,12 @@ Retain completed Dropbox model files until a separate owner-approved deletion po
 | --- | --- |
 | Existing sharing baseline | Owner reported test steps 1–6 passed on the isolated Worker; retain this regression baseline. |
 | Dropbox connection switch | Implemented for isolated testing: OAuth callback, encrypted offline tokens, account pin, scope/metadata check, local disconnect and diagnostic upload/download. Requires live owner authorization and transfer-test evidence. |
-| Full model uploads | Pending: authorized STL/3MF uploads, bounded progress/cancel/retry, completion verification, quotas and reconciliation. |
-| Model catalog and revisions | Pending: workspace-owned model selector, immutable asset references, atomic model/JSON revision binding and migration of old workspaces. |
+| Full model uploads | Implemented for test: authorized STL/3MF chunks, progress/cancel, bounded quotas, completion verification and private-path reconciliation. Live acceptance pending. |
+| Model catalog and revisions | Implemented for test with migration 0007: attached-model selection and atomic model/JSON history. Local-only replacements cannot publish shared geometry; recipients may export JSON/STLs without login. Live acceptance pending. |
 | Existing tool correctness | Pending final acceptance: analytics, visibility/opacity restoration, coordinate/units checks, Slicer round trips, concurrent recipients and older-model restoration. |
 | Promotion | Only after exact-commit CI, owner mobile/desktop acceptance, real cleanup/refresh checks and reviewed rollback. Separate environment credentials/resources for beta/main; no automatic account/data migration. |
 
-The current setup test is **not** a full STL/3MF upload test. Follow [Dropbox setup and test run](DROPBOX_TEST_SETUP.md), then report the connection and diagnostic transfer results. Credentials are entered privately in Cloudflare/Codespaces, never chat.
+Follow [Dropbox setup and test run, step 8](DROPBOX_TEST_SETUP.md#8-upgrade-for-workspace-model-uploads-migration-0007) for the upload/history upgrade and three access cases. The owner reported connection success; full upload/history acceptance remains pending. Credentials are entered privately in Cloudflare/Codespaces, never chat.
 
 ## References
 
@@ -69,3 +69,7 @@ The current setup test is **not** a full STL/3MF upload test. Follow [Dropbox se
 - [App folder and scope design](https://www.dropbox.com/developers/reference/developer-guide).
 - [OAuth and offline access](https://developers.dropbox.com/oauth-guide).
 - [Upload API](https://docs.dropboxapi.com/dropbox-api/api-reference/user-endpoints/files/upload).
+
+## Local-only work and access
+
+Show Workspace Revision for signed-in users even without a model, and for protected-workspace recipients. Place local-file, personal Dropbox-link and attached-model controls inside this section. Ordinary guests retain Browse Files and Load from URL. Local imports never upload automatically; department Dropbox writes require an authorized session and an explicit upload action. Recipients using local replacement geometry may export one Slicer-compatible JSON plus object STLs, but cannot publish an unhosted model into shared history. Switching back to an attached model restores shared save eligibility. Guest Project IO uses JSON export instead of a planning ZIP; individual STL export remains available.
