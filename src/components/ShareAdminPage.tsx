@@ -1,4 +1,4 @@
-import BoxConnectionPanel from './BoxConnectionPanel';
+import DropboxConnectionPanel from './DropboxConnectionPanel';
 import { useEffect, useRef, useState } from 'react';
 import { listManagedWorkspaces, revokeManagedWorkspace, revokeManagedWorkspaces, updateManagedWorkspace, createSharingUser, listSharingUsers, updateSharingUser, disableSharingUsers, type SharingUser, type ManagedWorkspace } from '../lib/shareAdmin';
 function localDate(value:number):string {const date=new Date(value);return new Date(value-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}
@@ -84,7 +84,7 @@ export default function ShareAdminPage() {
       <button disabled={busy||input.length<32} className="min-h-11 rounded bg-blue-600 px-4 text-white disabled:opacity-50">{busy?'Opening…':'Open workspace manager'}</button>
     </form>:<>
       <div className="flex flex-wrap gap-3"><button disabled={busy} onClick={()=>void run(signal=>refresh(password,signal))} className="min-h-11 rounded border px-3">Refresh</button><button onClick={()=>{request.current?.abort();setBusy(false);setPassword('');setInput('');setRows([]);setCursor(null);setSelected([]);setMessage('');setConfirmBatch(false);}} className="min-h-11 px-3 underline">Lock manager</button></div>
-      <BoxConnectionPanel adminPassword={password}/>
+      <DropboxConnectionPanel adminPassword={password}/>
       <SharingUsersPanel adminPassword={password}/>
       {modern&&<section className="flex flex-wrap items-center gap-3 rounded border border-red-200 bg-white p-3">
         <button className="min-h-11 rounded border px-3" disabled={busy||!activeRows.length} onClick={()=>{setSelected(activeRows.slice(0,50).map(row=>row.id));setConfirmBatch(false);}}>Select active links (up to 50)</button>

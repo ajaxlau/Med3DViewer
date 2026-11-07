@@ -1,5 +1,8 @@
 # Connect the Box test account
 
+> Superseded for the active test: the owner switched to Dropbox personal. Follow [Dropbox workflow plan](DROPBOX_WORKFLOW_PLAN.md) and [Dropbox setup/test guide](DROPBOX_TEST_SETUP.md). Retain the existing test Worker/D1/scope; these Box-specific instructions are historical.
+
+
 **Account requirement:** read the account correction below before continuing if you use a free personal/Individual account.
 
 This checkpoint adds administrator OAuth connection, read/upload-folder permission checks, encrypted tokens, refresh coordination and scheduled connection upkeep. **Model uploads and model-aware workspace revisions are still pending.** Use only draft PR #13's branch and the existing isolated Box-test Worker/database.

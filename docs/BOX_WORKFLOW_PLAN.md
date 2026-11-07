@@ -1,5 +1,8 @@
 # Department Box uploads and model-aware workspace revisions
 
+> Superseded for the active test: the owner switched to Dropbox personal. Follow [Dropbox workflow plan](DROPBOX_WORKFLOW_PLAN.md) and [Dropbox setup/test guide](DROPBOX_TEST_SETUP.md). Retain the existing test Worker/D1/scope; these Box-specific instructions are historical.
+
+
 Status: **implementation authorized; isolated deployment groundwork is in progress**. See the [Box test setup guide](BOX_TEST_SETUP.md). The Box OAuth connection is implemented for isolated testing; uploads and model-aware revisions remain to be implemented. See [connection testing](BOX_CONNECTION_TESTING.md). All milestones need acceptance before promotion.
 
 Review baseline: beta commit [`9dec4176`](https://github.com/ajaxlau/Med3DViewer/commit/9dec4176cb95f92e2818e73200c6c198c55814ad), including merged PR #12. This document extends the existing [platform improvement plan](PERFORMANCE_PLAN.md) with the upload/model-version workflow discussed with the owner. The previous limits on unrelated features, memory/GPU use, security and Slicer correctness still apply. Direct uploads are a newly requested addition, not an existing capability.

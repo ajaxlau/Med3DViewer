@@ -35,7 +35,7 @@ export function shareConfig(target, env = process.env, root = process.cwd()) {
     main: resolve(root, 'worker/entry.ts'),
     compatibility_date: '2026-10-03',
     assets: { directory: resolve(root, 'dist'), binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: ['/api/shares', '/api/shares/*', '/s/*'] },
-    vars: { SHARES_ENABLED: 'true', SHARES_ENVIRONMENT: target, ...(target === 'box-test' ? { BOX_ENABLED: 'true', BOX_ORIGIN: 'https://ntec3dpo-m3dv-box-test.x-panda.workers.dev', BOX_UPLOAD_FOLDER_ID: '435218173835' } : {}) },
+    vars: { SHARES_ENABLED: 'true', SHARES_ENVIRONMENT: target, ...(target === 'box-test' ? { BOX_ENABLED: 'false', DROPBOX_ENABLED: 'true', DROPBOX_ORIGIN: 'https://ntec3dpo-m3dv-box-test.x-panda.workers.dev', DROPBOX_FOLDER_PATH: '' } : {}) },
     d1_databases: [{ binding: 'SHARES_DB', database_name, database_id: env.SHARES_DB_ID, migrations_dir: resolve(root, 'migrations') }],
     // Worker Previews cannot run scheduled events; beta uses a separate,
     // scheduled-only cleanup Worker with the same beta database binding.

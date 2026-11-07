@@ -1,5 +1,8 @@
 # Isolated Box workflow test setup
 
+> Superseded for the active test: the owner switched to Dropbox personal. Follow [Dropbox workflow plan](DROPBOX_WORKFLOW_PLAN.md) and [Dropbox setup/test guide](DROPBOX_TEST_SETUP.md). Retain the existing test Worker/D1/scope; these Box-specific instructions are historical.
+
+
 **OAuth connection checkpoint:** after baseline setup, follow [Connect the Box test account](BOX_CONNECTION_TESTING.md) for migration 0005, runtime secrets, the exact callback and administrator connection. The earlier steps below document the original baseline checkpoint.
 
 Branch: `codex/box-workspace-upload-preview`, draft PR #13, targeting beta.
