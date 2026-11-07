@@ -1,5 +1,7 @@
 # Connect the Box test account
 
+**Account requirement:** read the account correction below before continuing if you use a free personal/Individual account.
+
 This checkpoint adds administrator OAuth connection, read/upload-folder permission checks, encrypted tokens, refresh coordination and scheduled connection upkeep. **Model uploads and model-aware workspace revisions are still pending.** Use only draft PR #13's branch and the existing isolated Box-test Worker/database.
 
 ## 1. Update the test Codespace
@@ -110,3 +112,13 @@ The first successful account is pinned for this test environment. A different ac
 The existing hourly Cron performs connection upkeep, attempting rotation at a ten-day interval to avoid Box refresh-token inactivity expiry. Provider errors and crashes can still require administrator reconnection. Actual live Cron behavior must be verified independently; a configured schedule or a unit test is not proof of scheduled execution.
 
 Report only **connected / test passed**, or the visible error text. Never share a full OAuth callback URL, authorization code, client secret, token or encryption key.
+
+## Account prerequisite — correction after live console testing
+
+A standard free personal/Individual Box account can display the Developer Console but cannot necessarily save OAuth redirect settings. The owner encountered “Some changes on the Configuration Page could not be saved,” followed by `redirect_uri_mismatch`. Box staff document this exact account-type restriction in [the configuration-save support thread](https://community.box.com/sdks-and-tools-7/box-developers-page-can-t-save-any-configuration-35195). Access to the console alone is not proof of full developer eligibility.
+
+For isolated testing, use a separate [free Box Developer account](https://app.box.com/signup/developer), with an email not already associated with Box, following [Box's Developer account guide](https://community.box.com/developer-experience-12/how-to-get-a-box-developer-account-free-developer-plan-35161). Use a private window to avoid reusing the personal-account session. Create a new User/OAuth application there; apps cannot be transferred between these account contexts. Verify that saving the exact callback survives a page reload before attempting authorization.
+
+For the simplest initial test, create a disposable model folder in the Developer account and give the developer only its folder ID. The current configured folder `435218173835` belongs to the personal-account setup; do not assume the new account can access it. Update/review the test deployment profile before switching folders. Replace only `BOX_CLIENT_ID` and `BOX_CLIENT_SECRET` with the new application's credentials privately; preserve all sharing secrets and `BOX_CREDENTIALS_KEY`. Do not delete/reset D1 or change beta/main. No successful OAuth connection/account pin has been reported yet; check before attempting any reassignment.
+
+The personal account and its existing folder need not be deleted. Developer account creation is an owner task; no account or paid subscription is created by the agent. If a verified Developer account still cannot save configuration, escalate the visible error to Box support rather than changing the callback to bypass validation.
