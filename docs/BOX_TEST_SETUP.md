@@ -1,5 +1,7 @@
 # Isolated Box workflow test setup
 
+**OAuth connection checkpoint:** after baseline setup, follow [Connect the Box test account](BOX_CONNECTION_TESTING.md) for migration 0005, runtime secrets, the exact callback and administrator connection. The earlier steps below document the original baseline checkpoint.
+
 Branch: `codex/box-workspace-upload-preview`, draft PR #13, targeting beta.
 
 This checkpoint deploys the existing viewer/sharing backend with an isolated database and hourly cleanup. **Box OAuth, model uploads and model-aware revisions are not implemented at this checkpoint.** An enabled sharing API confirms only the existing backend. Follow the [workflow plan](BOX_WORKFLOW_PLAN.md) for the remaining implementation phases. Do not merge to beta/main for this setup.

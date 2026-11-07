@@ -1,3 +1,4 @@
+import { handleBoxConnection, maintainBoxConnection, type BoxEnvironment } from './boxConnection';
 import { createUserSession, readUserSession, requireUserPermission, revokeUserSession, publicUserSession, userSessionCookie, SessionError, type SharingIdentity } from './userSessions';
 import { validateSharedWorkspace } from '../src/lib/planningData';
 import { HISTORY_BYTE_LIMIT, HISTORY_VERSION_LIMIT, equalDigest, modelShareKey, passwordDigest, randomToken, revisionAuthor, validWorkspacePassword } from './workspaceAccess';
@@ -14,7 +15,7 @@ export interface ShareDatabase {
   prepare(sql: string): D1Statement;
   batch(statements: D1Statement[]): Promise<D1Result[]>;
 }
-export interface ShareEnvironment {
+export interface ShareEnvironment extends BoxEnvironment {
   ASSETS?: { fetch(request: Request): Promise<Response> };
   SHARES_DB?: ShareDatabase;
   SHARES_ENABLED?: string;
@@ -656,7 +657,12 @@ export function createShareWorker(dependencies: Dependencies = {}) {
       if (!url.pathname.startsWith('/api/shares')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found',{ status: 404 });
       try {
         if (request.headers.has('Origin') && request.headers.get('Origin') !== url.origin) throw new ShareError(403,'ORIGIN_INVALID','Cross-origin share requests are not allowed.');
-        if (url.search && url.pathname !== '/api/shares/admin') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
+        if (url.search && url.pathname !== '/api/shares/admin' && url.pathname !== '/api/shares/box/callback') throw new ShareError(400,'REQUEST_INVALID','Share endpoints do not accept query parameters.');
+        if (url.pathname === '/api/shares/box/callback' || /^\/api\/shares\/admin\/box(?:\/(?:connect|check|disconnect))?$/.test(url.pathname)) {
+          if (url.pathname !== '/api/shares/box/callback') await authenticate(request, env);
+          if (!await environmentReady(env)) throw new ShareError(503, 'SHARING_DISABLED', 'Sharing is not configured.');
+          return await handleBoxConnection(request, env, upstreamFetch, now());
+        }
         if (url.pathname === '/api/shares/config' && request.method === 'GET') {
           const enabled = await environmentReady(env);
           return json(enabled ? {enabled:true,editingEnabled:await editableSchemaReady(env),...(await historySchemaReady(env)?{historyEnabled:true}:{}),formats:['stl','3mf','glb']} : {enabled:false});
@@ -786,7 +792,7 @@ export function createShareWorker(dependencies: Dependencies = {}) {
       }
     },
     async scheduled(_controller: unknown, env: ShareEnvironment): Promise<void> {
-      await cleanupExpiredShares(env,now());
+      await cleanupExpiredShares(env,now()); await maintainBoxConnection(env,upstreamFetch,now());
     },
   };
 }
